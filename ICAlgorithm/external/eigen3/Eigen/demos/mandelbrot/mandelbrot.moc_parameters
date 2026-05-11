@@ -1,0 +1,7 @@
+-I/home/ros-industrial/HansRobotLib/include/eigen3
+-I/home/ros-industrial/HansRobotLib/include/eigen3/Eigen
+-I/usr/include/qt4
+-DNDEBUG
+-o
+/home/ros-industrial/HansRobotLib/include/eigen3/Eigen/demos/mandelbrot/mandelbrot.moc
+/home/ros-industrial/HansRobotLib/include/eigen3/demos/mandelbrot/mandelbrot.h

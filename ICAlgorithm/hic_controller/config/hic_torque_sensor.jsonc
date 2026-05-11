@@ -1,0 +1,35 @@
+{
+  "HRC": {
+    "Robot0": {
+      "torqueSensorConfig": {
+        "version": "1.0",
+        "unit": "N.m",
+        "sensor_location": "post_reducer",
+        "joints": {
+          "torquesensor1": {
+            "enabled": true,
+            "joint_index": 1,
+            "hardware_channel": 0,
+            "rated_capacity_Nm": 120.0,
+            "direction_sign": 1,
+            "zero_offset_Nm": 0.0,
+            "scale": 1.0,
+            "bias_Nm": 0.0,
+            "max_valid_torque_Nm": 120.0
+          },
+          "torquesensor2": {
+            "enabled": true,
+            "joint_index": 2,
+            "hardware_channel": 1,
+            "rated_capacity_Nm": 120.0,
+            "direction_sign": 1,
+            "zero_offset_Nm": 0.0,
+            "scale": 1.0,
+            "bias_Nm": 0.0,
+            "max_valid_torque_Nm": 120.0
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+    "version": 4,
+    "configurations": [
+        {
+            "name": "Linux",
+            "compilerPath": "/usr/bin/g++",
+            "intelliSenseMode": "linux-gcc-x64",
+            "cppStandard": "c++17",
+            "compileCommands": "${workspaceFolder}/ICAlgorithm/build/compile_commands.json",
+            "includePath": [
+                "${workspaceFolder}/ICAlgorithm/hic_controller/include",
+                "${workspaceFolder}/ICAlgorithm/hic_controller/src/common",
+                "${workspaceFolder}/ICAlgorithm/hic_controller/src/dynamics",
+                "${workspaceFolder}/ICAlgorithm/hic_controller/src/kinematics",
+                "${workspaceFolder}/ICAlgorithm/external/Components",
+                "${workspaceFolder}/ICAlgorithm/external/Platforms/Linux",
+                "${workspaceFolder}/ICAlgorithm/external/eigen3"
+            ],
+            "browse": {
+                "path": [
+                    "${workspaceFolder}/ICAlgorithm/hic_controller/include",
+                    "${workspaceFolder}/ICAlgorithm/hic_controller/src",
+                    "${workspaceFolder}/ICAlgorithm/external/Components",
+                    "${workspaceFolder}/ICAlgorithm/external/Platforms/Linux",
+                    "${workspaceFolder}/ICAlgorithm/external/eigen3"
+                ],
+                "limitSymbolsToIncludedHeaders": false
+            }
+        }
+    ]
+}

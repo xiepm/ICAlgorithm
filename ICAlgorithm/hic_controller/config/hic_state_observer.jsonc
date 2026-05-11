@@ -1,0 +1,18 @@
+{
+  // HIC 机器人自身状态观测器示例配置
+  "stateObserverConfig": {
+    "jointCount": 7,
+    "controlPeriod": 0.001,
+    "enablePositionFilter": false,
+    "enableVelocityFilter": true,
+    "enableAccelerationFilter": true,
+    "enableMotorCurrentFilter": true,
+    "enableMeasuredTorqueFilter": true,
+    "enableCurrentToTorqueEstimate": true,
+    "positionFilterAlpha": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+    "velocityFilterAlpha": [0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2],
+    "accelerationFilterAlpha": [0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2],
+    "motorCurrentFilterAlpha": [0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2],
+    "measuredTorqueFilterAlpha": [0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2]
+  }
+}
