@@ -217,12 +217,12 @@ inline HicTorqueSensorConfig makeTorqueSensorConfig(const HicInitializeConfig& c
 
 inline int applyDefaultRuntimeConfig(const HicControlConfig& config)
 {
-	int status = hic_set_dynamics_linear_parameters(config.dynamicParams);
+	int status = hic_set_dynamics_linear_parameters(0, config.dynamicParams);
 	if (status != HIC_STATUS_OK)
 	{
 		return status;
 	}
-	status = hic_set_motor_torque_conversion_parameters(
+	status = hic_set_motor_torque_conversion_parameters(0, 
 		config.torqueConstant, config.gearRatio, config.transmissionEfficiency);
 	if (status != HIC_STATUS_OK)
 	{
@@ -250,27 +250,27 @@ inline int applyDefaultRuntimeConfig(const HicControlConfig& config)
 		currentLimits.lower[i] = config.lowerMotorCurrent[i];
 		currentLimits.upper[i] = config.upperMotorCurrent[i];
 	}
-	status = hic_set_joint_position_limits(&positionLimits);
+	status = hic_set_joint_position_limits(0, &positionLimits);
 	if (status != HIC_STATUS_OK)
 	{
 		return status;
 	}
-	status = hic_set_joint_velocity_limits(&velocityLimits);
+	status = hic_set_joint_velocity_limits(0, &velocityLimits);
 	if (status != HIC_STATUS_OK)
 	{
 		return status;
 	}
-	status = hic_set_joint_acceleration_limits(&accelerationLimits);
+	status = hic_set_joint_acceleration_limits(0, &accelerationLimits);
 	if (status != HIC_STATUS_OK)
 	{
 		return status;
 	}
-	status = hic_set_joint_torque_limits(&torqueLimits);
+	status = hic_set_joint_torque_limits(0, &torqueLimits);
 	if (status != HIC_STATUS_OK)
 	{
 		return status;
 	}
-	return hic_set_motor_current_limits(&currentLimits);
+	return hic_set_motor_current_limits(0, &currentLimits);
 }
 
 inline HicImpedanceGains makeDefaultGains()

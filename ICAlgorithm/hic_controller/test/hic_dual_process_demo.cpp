@@ -151,12 +151,12 @@ HicTorqueSensorConfig makeTorqueSensorConfig(const HicInitializeConfig& config)
 
 int applyDefaultRuntimeConfig(const HicControlConfig& config)
 {
-	int status = hic_set_dynamics_linear_parameters(config.dynamicParams);
+	int status = hic_set_dynamics_linear_parameters(0, config.dynamicParams);
 	if (status != HIC_STATUS_OK)
 	{
 		return status;
 	}
-	status = hic_set_motor_torque_conversion_parameters(
+	status = hic_set_motor_torque_conversion_parameters(0, 
 		config.torqueConstant, config.gearRatio, config.transmissionEfficiency);
 	if (status != HIC_STATUS_OK)
 	{
@@ -184,27 +184,27 @@ int applyDefaultRuntimeConfig(const HicControlConfig& config)
 		currentLimits.lower[i] = config.lowerMotorCurrent[i];
 		currentLimits.upper[i] = config.upperMotorCurrent[i];
 	}
-	status = hic_set_joint_position_limits(&positionLimits);
+	status = hic_set_joint_position_limits(0, &positionLimits);
 	if (status != HIC_STATUS_OK)
 	{
 		return status;
 	}
-	status = hic_set_joint_velocity_limits(&velocityLimits);
+	status = hic_set_joint_velocity_limits(0, &velocityLimits);
 	if (status != HIC_STATUS_OK)
 	{
 		return status;
 	}
-	status = hic_set_joint_acceleration_limits(&accelerationLimits);
+	status = hic_set_joint_acceleration_limits(0, &accelerationLimits);
 	if (status != HIC_STATUS_OK)
 	{
 		return status;
 	}
-	status = hic_set_joint_torque_limits(&torqueLimits);
+	status = hic_set_joint_torque_limits(0, &torqueLimits);
 	if (status != HIC_STATUS_OK)
 	{
 		return status;
 	}
-	return hic_set_motor_current_limits(&currentLimits);
+	return hic_set_motor_current_limits(0, &currentLimits);
 }
 
 HicImpedanceGains makeDefaultGains()
@@ -340,7 +340,7 @@ int initializeController()
 {
 	const HicInitializeConfig initConfig = makeDefaultInitializeConfig();
 	const HicControlConfig runtimeConfig = makeDefaultRuntimeConfig(initConfig);
-	int status = hic_initialize_control(&initConfig);
+	int status = hic_initialize_control(0, &initConfig);
 	std::cout << "init status: " << status << std::endl;
 	if (status != HIC_STATUS_OK)
 	{
@@ -355,7 +355,7 @@ int initializeController()
 	}
 
 	HicTorqueSensorConfig torqueConfig = makeTorqueSensorConfig(initConfig);
-	status = hic_set_joint_torque_sensor_parameters(&torqueConfig);
+	status = hic_set_joint_torque_sensor_parameters(0, &torqueConfig);
 	std::cout << "set torque sensor config status: " << status << std::endl;
 	if (status != HIC_STATUS_OK)
 	{
@@ -363,7 +363,7 @@ int initializeController()
 	}
 
 	HicImpedanceGains gains = makeDefaultGains();
-	status = hic_set_cartesian_impedance_gains(&gains);
+	status = hic_set_cartesian_impedance_gains(0, &gains);
 	std::cout << "set impedance gains status: " << status << std::endl;
 	return status;
 }
@@ -378,13 +378,13 @@ int syncControllerState(const RobotFeedSnapshot& snapshot)
 		input.motorCurrent[i] = snapshot.motorCurrent[i];
 	}
 	input.currentTime = snapshot.currentTime;
-	return hic_update_state_estimates(&input);
+	return hic_update_state_estimates(0, &input);
 }
 
 void printObservedState()
 {
 	HicRobotState robotState = {};
-	const int robotStateStatus = hic_get_robot_state(&robotState);
+	const int robotStateStatus = hic_get_robot_state(0, &robotState);
 	std::cout << "robot state status: " << robotStateStatus << std::endl;
 	if (robotStateStatus == HIC_STATUS_OK)
 	{
@@ -396,13 +396,13 @@ void printObservedState()
 	}
 
 	HicActiveControlState activeState = {};
-	const int activeStateStatus = hic_get_active_control_state(&activeState);
+	const int activeStateStatus = hic_get_active_control_state(0, &activeState);
 	if (activeStateStatus == HIC_STATUS_OK &&
 	    activeState.forceControlMode != HIC_FORCE_CONTROL_MODE_NONE)
 	{
 		double jointTorque[HIC_MAX_JOINTS] = { 0.0 };
 		bool protection[HIC_MAX_JOINTS] = { false };
-		const int torqueStatus = hic_get_force_control_torque_commands(jointTorque, protection);
+		const int torqueStatus = hic_get_force_control_torque_commands(0, jointTorque, protection);
 		std::cout << "force control torque status: " << torqueStatus << std::endl;
 		if (torqueStatus == HIC_STATUS_OK || torqueStatus == HIC_STATUS_ERROR_CURRENT_LIMIT)
 		{
@@ -427,27 +427,27 @@ void printSharedSnapshot(const RobotFeedSnapshot& snapshot)
 
 void printModeOutput()
 {
-	const int mode = hic_get_force_control_mode();
-	std::cout << "force control mode: " << mode << ", last status: " << hic_get_last_status() << std::endl;
+	const int mode = hic_get_force_control_mode(0);
+	std::cout << "force control mode: " << mode << ", last status: " << hic_get_last_status(0) << std::endl;
 
 	double motorCurrentCmd[HIC_MAX_JOINTS] = { 0.0 };
 	bool protection[HIC_MAX_JOINTS] = { false };
 	int outputStatus = HIC_STATUS_OK;
 
 	HicActiveControlState activeState = {};
-	const int activeStateStatus = hic_get_active_control_state(&activeState);
+	const int activeStateStatus = hic_get_active_control_state(0, &activeState);
 	if (activeStateStatus == HIC_STATUS_OK &&
 	    mode == HIC_FORCE_CONTROL_MODE_ZERO_FORCE &&
 	    activeState.forceControlMode == HIC_FORCE_CONTROL_MODE_ZERO_FORCE)
 	{
-		outputStatus = hic_get_force_control_current_commands(motorCurrentCmd, protection);
+		outputStatus = hic_get_force_control_current_commands(0, motorCurrentCmd, protection);
 		std::cout << "zero force current status: " << outputStatus << std::endl;
 	}
 	else if (activeStateStatus == HIC_STATUS_OK &&
 		 mode != HIC_FORCE_CONTROL_MODE_NONE &&
 		 activeState.forceControlMode != HIC_FORCE_CONTROL_MODE_NONE)
 	{
-		outputStatus = hic_get_force_control_current_commands(motorCurrentCmd, protection);
+		outputStatus = hic_get_force_control_current_commands(0, motorCurrentCmd, protection);
 		std::cout << "impedance current status: " << outputStatus << std::endl;
 	}
 	else
@@ -464,7 +464,7 @@ void printModeOutput()
 	printObservedState();
 
 	HicCartesianState cartesianState = {};
-	const int cartesianStatus = hic_get_current_cartesian_state(&cartesianState);
+	const int cartesianStatus = hic_get_current_cartesian_state(0, &cartesianState);
 	std::cout << "cartesian state status: " << cartesianStatus << std::endl;
 	if (cartesianStatus == HIC_STATUS_OK)
 	{
@@ -600,7 +600,7 @@ int main()
 			std::cout << "sync status: " << status << std::endl;
 			if (status == HIC_STATUS_OK)
 			{
-				status = hic_start_force_control_mode(HIC_FORCE_CONTROL_MODE_ZERO_FORCE);
+				status = hic_start_force_control_mode(0, HIC_FORCE_CONTROL_MODE_ZERO_FORCE);
 				std::cout << "start zero force status: " << status << std::endl;
 			}
 			printModeOutput();
@@ -612,12 +612,12 @@ int main()
 			std::cout << "sync status: " << status << std::endl;
 			if (status == HIC_STATUS_OK)
 			{
-				status = hic_capture_current_pose_as_fixed_target();
+				status = hic_capture_current_pose_as_fixed_target(0);
 				std::cout << "capture fixed pose target status: " << status << std::endl;
 			}
 			if (status == HIC_STATUS_OK)
 			{
-				status = hic_start_force_control_mode(HIC_FORCE_CONTROL_MODE_CARTESIAN_FIXED_POSE);
+				status = hic_start_force_control_mode(0, HIC_FORCE_CONTROL_MODE_CARTESIAN_FIXED_POSE);
 				std::cout << "start fixed pose mode status: " << status << std::endl;
 			}
 			printModeOutput();
@@ -650,22 +650,22 @@ int main()
 		}
 		if (command == "stop")
 		{
-			const int mode = hic_get_force_control_mode();
+			const int mode = hic_get_force_control_mode(0);
 			int status = HIC_STATUS_OK;
 			HicActiveControlState activeState = {};
-			const int activeStateStatus = hic_get_active_control_state(&activeState);
+			const int activeStateStatus = hic_get_active_control_state(0, &activeState);
 			if (activeStateStatus == HIC_STATUS_OK &&
 			    mode == HIC_FORCE_CONTROL_MODE_ZERO_FORCE &&
 			    activeState.forceControlMode == HIC_FORCE_CONTROL_MODE_ZERO_FORCE)
 			{
-				status = hic_prepare_stop_force_control_mode();
+				status = hic_prepare_stop_force_control_mode(0);
 				std::cout << "prepare stop zero force status: " << status << std::endl;
 			}
 			else if (activeStateStatus == HIC_STATUS_OK &&
 				 mode != HIC_FORCE_CONTROL_MODE_NONE &&
 				 activeState.forceControlMode != HIC_FORCE_CONTROL_MODE_NONE)
 			{
-				status = hic_prepare_stop_force_control_mode();
+				status = hic_prepare_stop_force_control_mode(0);
 				std::cout << "prepare stop impedance status: " << status << std::endl;
 			}
 			else
@@ -682,7 +682,7 @@ int main()
 		}
 		if (command == "reset")
 		{
-			const int status = hic_reset_control();
+			const int status = hic_reset_control(0);
 			std::cout << "reset status: " << status << std::endl;
 			continue;
 		}

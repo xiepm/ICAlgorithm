@@ -102,12 +102,12 @@ HicTorqueSensorConfig makeTorqueSensorConfig(const HicInitializeConfig& config)
 
 int applyDefaultRuntimeConfig(const HicControlConfig& config)
 {
-	int status = hic_set_dynamics_linear_parameters(config.dynamicParams);
+	int status = hic_set_dynamics_linear_parameters(0, config.dynamicParams);
 	if (status != HIC_STATUS_OK)
 	{
 		return status;
 	}
-	status = hic_set_motor_torque_conversion_parameters(
+	status = hic_set_motor_torque_conversion_parameters(0, 
 		config.torqueConstant, config.gearRatio, config.transmissionEfficiency);
 	if (status != HIC_STATUS_OK)
 	{
@@ -135,27 +135,27 @@ int applyDefaultRuntimeConfig(const HicControlConfig& config)
 		currentLimits.lower[i] = config.lowerMotorCurrent[i];
 		currentLimits.upper[i] = config.upperMotorCurrent[i];
 	}
-	status = hic_set_joint_position_limits(&positionLimits);
+	status = hic_set_joint_position_limits(0, &positionLimits);
 	if (status != HIC_STATUS_OK)
 	{
 		return status;
 	}
-	status = hic_set_joint_velocity_limits(&velocityLimits);
+	status = hic_set_joint_velocity_limits(0, &velocityLimits);
 	if (status != HIC_STATUS_OK)
 	{
 		return status;
 	}
-	status = hic_set_joint_acceleration_limits(&accelerationLimits);
+	status = hic_set_joint_acceleration_limits(0, &accelerationLimits);
 	if (status != HIC_STATUS_OK)
 	{
 		return status;
 	}
-	status = hic_set_joint_torque_limits(&torqueLimits);
+	status = hic_set_joint_torque_limits(0, &torqueLimits);
 	if (status != HIC_STATUS_OK)
 	{
 		return status;
 	}
-	return hic_set_motor_current_limits(&currentLimits);
+	return hic_set_motor_current_limits(0, &currentLimits);
 }
 
 HicImpedanceGains makeDefaultGains()
@@ -208,12 +208,12 @@ int updateState(
 		input.motorCurrent[i] = motorCurrent ? motorCurrent[i] : 0.0;
 	}
 	input.currentTime = currentTime;
-	return hic_update_state_estimates(&input);
+	return hic_update_state_estimates(0, &input);
 }
 
 int initializeDemoController(const HicInitializeConfig& initConfig, const HicControlConfig& runtimeConfig)
 {
-	int status = hic_initialize_control(&initConfig);
+	int status = hic_initialize_control(0, &initConfig);
 	std::cout << "init status: " << status << std::endl;
 	if (status != HIC_STATUS_OK)
 	{
@@ -228,7 +228,7 @@ int initializeDemoController(const HicInitializeConfig& initConfig, const HicCon
 	}
 
 	HicTorqueSensorConfig torqueConfig = makeTorqueSensorConfig(initConfig);
-	status = hic_set_joint_torque_sensor_parameters(&torqueConfig);
+	status = hic_set_joint_torque_sensor_parameters(0, &torqueConfig);
 	std::cout << "set torque sensor config status: " << status << std::endl;
 	if (status != HIC_STATUS_OK)
 	{
@@ -236,7 +236,7 @@ int initializeDemoController(const HicInitializeConfig& initConfig, const HicCon
 	}
 
 	double rawTorqueByHardwareChannel[HIC_MAX_JOINTS] = { 1.2, -0.8, 0.5, 0.1, -0.2, 0.3, -0.4 };
-	status = hic_update_raw_joint_torque_sensor(rawTorqueByHardwareChannel);
+	status = hic_update_raw_joint_torque_sensor(0, rawTorqueByHardwareChannel);
 	std::cout << "update raw torque sensor status: " << status << std::endl;
 	if (status != HIC_STATUS_OK)
 	{
@@ -244,7 +244,7 @@ int initializeDemoController(const HicInitializeConfig& initConfig, const HicCon
 	}
 
 	HicImpedanceGains gains = makeDefaultGains();
-	status = hic_set_cartesian_impedance_gains(&gains);
+	status = hic_set_cartesian_impedance_gains(0, &gains);
 	std::cout << "set gains status: " << status << std::endl;
 	return status;
 }
@@ -265,30 +265,30 @@ int testFixedPointImpedance()
 	status = updateState(config, qCapture, motorCurrent, 0.0);
 	std::cout << "capture state update status: " << status << std::endl;
 
-	status = hic_capture_current_pose_as_fixed_target();
+	status = hic_capture_current_pose_as_fixed_target(0);
 	std::cout << "capture current pose status: " << status << std::endl;
 
 	double qDisturbed[HIC_MAX_JOINTS] = { 0.12, -0.18, 0.31, 0.22, -0.08, 0.11, 0.17 };
 	status = updateState(config, qDisturbed, motorCurrent, 0.001);
 	std::cout << "disturbed state update status: " << status << std::endl;
 
-	status = hic_start_force_control_mode(HIC_FORCE_CONTROL_MODE_CARTESIAN_FIXED_POSE);
+	status = hic_start_force_control_mode(0, HIC_FORCE_CONTROL_MODE_CARTESIAN_FIXED_POSE);
 	std::cout << "start fixed impedance status: " << status << std::endl;
 
 	double torqueCmd[HIC_MAX_JOINTS] = { 0.0 };
 	bool protection[HIC_MAX_JOINTS] = { false };
-	status = hic_get_force_control_torque_commands(torqueCmd, protection);
+	status = hic_get_force_control_torque_commands(0, torqueCmd, protection);
 	std::cout << "torque command status: " << status << std::endl;
 	printVector("torque command", torqueCmd, config.jointCount);
 	printBoolVector("protection", protection, config.jointCount);
 
 	HicCartesianState cartesianState = {};
-	status = hic_get_current_cartesian_state(&cartesianState);
+	status = hic_get_current_cartesian_state(0, &cartesianState);
 	std::cout << "get cartesian state status: " << status << std::endl;
 	printVector("current pose", cartesianState.pose, HIC_POSE_DIM);
 	printVector("current twist", cartesianState.twist, HIC_CARTESIAN_DIM);
 
-	return hic_prepare_stop_force_control_mode();
+	return hic_prepare_stop_force_control_mode(0);
 }
 
 int testFixedPositionWithNullspace()
@@ -315,27 +315,27 @@ int testFixedPositionWithNullspace()
 		nullspace.stiffness[i] = 2.0;
 		nullspace.damping[i] = 0.2;
 	}
-	status = hic_set_force_control_nullspace_config(&nullspace);
+	status = hic_set_force_control_nullspace_config(0, &nullspace);
 	std::cout << "set nullspace config status: " << status << std::endl;
-	status = hic_capture_current_joint_position_as_nullspace_target();
+	status = hic_capture_current_joint_position_as_nullspace_target(0);
 	std::cout << "capture current joint as nullspace target status: " << status << std::endl;
-	status = hic_capture_current_position_as_fixed_target();
+	status = hic_capture_current_position_as_fixed_target(0);
 	std::cout << "capture current position status: " << status << std::endl;
 
 	double qDisturbed[HIC_MAX_JOINTS] = { 0.13, -0.17, 0.33, 0.18, -0.12, 0.13, 0.10 };
 	status = updateState(config, qDisturbed, motorCurrent, 0.001);
 	std::cout << "disturbed state update status: " << status << std::endl;
-	status = hic_start_force_control_mode(HIC_FORCE_CONTROL_MODE_CARTESIAN_FIXED_POSITION);
+	status = hic_start_force_control_mode(0, HIC_FORCE_CONTROL_MODE_CARTESIAN_FIXED_POSITION);
 	std::cout << "start fixed position mode status: " << status << std::endl;
 
 	double torqueCmd[HIC_MAX_JOINTS] = { 0.0 };
 	bool protection[HIC_MAX_JOINTS] = { false };
-	status = hic_get_force_control_torque_commands(torqueCmd, protection);
+	status = hic_get_force_control_torque_commands(0, torqueCmd, protection);
 	std::cout << "fixed position torque status: " << status << std::endl;
 	printVector("fixed position torque", torqueCmd, config.jointCount);
 	printBoolVector("fixed position protection", protection, config.jointCount);
 
-	return hic_prepare_stop_force_control_mode();
+	return hic_prepare_stop_force_control_mode(0);
 }
 
 int testTrajectoryImpedance()
@@ -349,7 +349,7 @@ int testTrajectoryImpedance()
 		return status;
 	}
 
-	status = hic_start_force_control_mode(HIC_FORCE_CONTROL_MODE_CARTESIAN_TRAJECTORY);
+	status = hic_start_force_control_mode(0, HIC_FORCE_CONTROL_MODE_CARTESIAN_TRAJECTORY);
 	std::cout << "start trajectory impedance status: " << status << std::endl;
 
 	double q[HIC_MAX_JOINTS] = { 0.10, -0.20, 0.30, 0.20, -0.10, 0.10, 0.15 };
@@ -371,14 +371,14 @@ int testTrajectoryImpedance()
 
 		status = updateState(config, q, motorCurrent, 0.001 * (step + 1));
 		std::cout << "step " << step << " update state status: " << status << std::endl;
-		status = hic_set_cartesian_trajectory_target_zyx_euler(targetPoseZyxEuler, targetVelocity);
+		status = hic_set_cartesian_trajectory_target_zyx_euler(0, targetPoseZyxEuler, targetVelocity);
 		std::cout << "step " << step << " set online target status: " << status << std::endl;
-		status = hic_get_force_control_torque_commands(torqueCmd, protection);
+		status = hic_get_force_control_torque_commands(0, torqueCmd, protection);
 		std::cout << "step " << step << " torque status: " << status << std::endl;
 		printVector("trajectory torque", torqueCmd, config.jointCount);
 	}
 
-	return hic_prepare_stop_force_control_mode();
+	return hic_prepare_stop_force_control_mode(0);
 }
 
 int testZeroForceMode()
@@ -401,23 +401,23 @@ int testZeroForceMode()
 	status = updateState(config, q1, motorCurrent, 0.02);
 	std::cout << "zero force state update #1 status: " << status << std::endl;
 
-	status = hic_start_force_control_mode(HIC_FORCE_CONTROL_MODE_ZERO_FORCE);
+	status = hic_start_force_control_mode(0, HIC_FORCE_CONTROL_MODE_ZERO_FORCE);
 	std::cout << "start zero force status: " << status << std::endl;
 
 	double currentCmd[HIC_MAX_JOINTS] = { 0.0 };
 	bool protection[HIC_MAX_JOINTS] = { false };
-	status = hic_get_force_control_current_commands(currentCmd, protection);
+	status = hic_get_force_control_current_commands(0, currentCmd, protection);
 	std::cout << "zero force current status: " << status << std::endl;
 	printVector("zero force current", currentCmd, config.jointCount);
 	printBoolVector("zero force protection", protection, config.jointCount);
 
-	status = hic_prepare_stop_force_control_mode();
+	status = hic_prepare_stop_force_control_mode(0);
 	std::cout << "prepare stop zero force status: " << status << std::endl;
 
 	double qStop[HIC_MAX_JOINTS] = { 0.101, -0.199, 0.2995, 0.2005, -0.0998, 0.1002, 0.1499 };
 	status = updateState(config, qStop, motorCurrent, 0.14);
 	std::cout << "stop settle state update status: " << status << std::endl;
-	status = hic_get_force_control_current_commands(currentCmd, protection);
+	status = hic_get_force_control_current_commands(0, currentCmd, protection);
 	std::cout << "stop settle current status: " << status << std::endl;
 	printVector("stop settle current", currentCmd, config.jointCount);
 	printBoolVector("stop settle protection", protection, config.jointCount);
@@ -445,17 +445,17 @@ int testZeroForceSoftBoundary()
 	status = updateState(config, q1, motorCurrent, 0.02);
 	std::cout << "soft boundary state update #1 status: " << status << std::endl;
 
-	status = hic_start_force_control_mode(HIC_FORCE_CONTROL_MODE_ZERO_FORCE);
+	status = hic_start_force_control_mode(0, HIC_FORCE_CONTROL_MODE_ZERO_FORCE);
 	std::cout << "start zero force soft boundary status: " << status << std::endl;
 
 	double currentCmd[HIC_MAX_JOINTS] = { 0.0 };
 	bool protection[HIC_MAX_JOINTS] = { false };
-	status = hic_get_force_control_current_commands(currentCmd, protection);
+	status = hic_get_force_control_current_commands(0, currentCmd, protection);
 	std::cout << "soft boundary zero force current status: " << status << std::endl;
 	printVector("soft boundary zero force current", currentCmd, config.jointCount);
 	printBoolVector("soft boundary zero force protection", protection, config.jointCount);
 
-	return hic_prepare_stop_force_control_mode();
+	return hic_prepare_stop_force_control_mode(0);
 }
 
 int testZeroForceRejectNearHardLimit()
@@ -474,7 +474,7 @@ int testZeroForceRejectNearHardLimit()
 	status = updateState(config, qNearLimit, motorCurrent, 0.0);
 	std::cout << "near limit state update status: " << status << std::endl;
 
-	status = hic_start_force_control_mode(HIC_FORCE_CONTROL_MODE_ZERO_FORCE);
+	status = hic_start_force_control_mode(0, HIC_FORCE_CONTROL_MODE_ZERO_FORCE);
 	std::cout << "start zero force near limit status: " << status << std::endl;
 	return status;
 }

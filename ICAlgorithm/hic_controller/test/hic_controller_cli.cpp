@@ -95,7 +95,7 @@ int initializeController()
 	using namespace hic_test;
 	const HicInitializeConfig initConfig = makeDefaultInitializeConfig();
 	const HicControlConfig runtimeConfig = makeDefaultRuntimeConfig(initConfig);
-	int status = hic_initialize_control(&initConfig);
+	int status = hic_initialize_control(0, &initConfig);
 	std::cout << "init status: " << status << std::endl;
 	if (status != HIC_STATUS_OK)
 	{
@@ -110,7 +110,7 @@ int initializeController()
 	}
 
 	HicTorqueSensorConfig torqueConfig = makeTorqueSensorConfig(initConfig);
-	status = hic_set_joint_torque_sensor_parameters(&torqueConfig);
+	status = hic_set_joint_torque_sensor_parameters(0, &torqueConfig);
 	std::cout << "set torque sensor config status: " << status << std::endl;
 	if (status != HIC_STATUS_OK)
 	{
@@ -118,7 +118,7 @@ int initializeController()
 	}
 
 	HicImpedanceGains gains = makeDefaultGains();
-	status = hic_set_cartesian_impedance_gains(&gains);
+	status = hic_set_cartesian_impedance_gains(0, &gains);
 	std::cout << "set impedance gains status: " << status << std::endl;
 	return status;
 }
@@ -249,7 +249,7 @@ int syncControllerState(const hic_test::StatePacket& packet)
 		input.motorCurrent[i] = packet.motorCurrent[i];
 	}
 	input.currentTime = packet.currentTime;
-	return hic_update_state_estimates(&input);
+	return hic_update_state_estimates(0, &input);
 }
 
 // 打印“控制器内部看到的机器人状态”。
@@ -272,7 +272,7 @@ int syncControllerState(const hic_test::StatePacket& packet)
 void printObservedState()
 {
 	HicRobotState robotState = {};
-	const int robotStateStatus = hic_get_robot_state(&robotState);
+	const int robotStateStatus = hic_get_robot_state(0, &robotState);
 	std::cout << "robot state status: " << robotStateStatus << std::endl;
 	if (robotStateStatus == HIC_STATUS_OK)
 	{
@@ -284,13 +284,13 @@ void printObservedState()
 	}
 
 	HicActiveControlState activeState = {};
-	const int activeStateStatus = hic_get_active_control_state(&activeState);
+	const int activeStateStatus = hic_get_active_control_state(0, &activeState);
 	if (activeStateStatus == HIC_STATUS_OK &&
 	    activeState.forceControlMode != HIC_FORCE_CONTROL_MODE_NONE)
 	{
 		double jointTorque[HIC_MAX_JOINTS] = { 0.0 };
 		bool protection[HIC_MAX_JOINTS] = { false };
-		const int torqueStatus = hic_get_force_control_torque_commands(jointTorque, protection);
+		const int torqueStatus = hic_get_force_control_torque_commands(0, jointTorque, protection);
 		std::cout << "force control torque status: " << torqueStatus << std::endl;
 		if (torqueStatus == HIC_STATUS_OK || torqueStatus == HIC_STATUS_ERROR_CURRENT_LIMIT)
 		{
@@ -344,19 +344,19 @@ void printPacket(const hic_test::StatePacket& packet)
 // 也就是说，这一个函数基本就是“这一拍控制结果的总览”。
 void printModeOutput()
 {
-	const int mode = hic_get_force_control_mode();
-	std::cout << "force control mode: " << mode << ", last status: " << hic_get_last_status() << std::endl;
+	const int mode = hic_get_force_control_mode(0);
+	std::cout << "force control mode: " << mode << ", last status: " << hic_get_last_status(0) << std::endl;
 
 	double motorCurrentCmd[HIC_MAX_JOINTS] = { 0.0 };
 	bool protection[HIC_MAX_JOINTS] = { false };
 	HicActiveControlState activeState = {};
-	const int activeStateStatus = hic_get_active_control_state(&activeState);
+	const int activeStateStatus = hic_get_active_control_state(0, &activeState);
 
 	if (activeStateStatus == HIC_STATUS_OK &&
 	    mode == HIC_FORCE_CONTROL_MODE_ZERO_FORCE &&
 	    activeState.forceControlMode == HIC_FORCE_CONTROL_MODE_ZERO_FORCE)
 	{
-		const int status = hic_get_force_control_current_commands(motorCurrentCmd, protection);
+		const int status = hic_get_force_control_current_commands(0, motorCurrentCmd, protection);
 		std::cout << "zero force current status: " << status << std::endl;
 		printVector("motorCurrentCommand", motorCurrentCmd, hic_test::kDemoJointCount);
 		printBoolVector("jointProtectionStatus", protection, hic_test::kDemoJointCount);
@@ -365,7 +365,7 @@ void printModeOutput()
 		 mode != HIC_FORCE_CONTROL_MODE_NONE &&
 		 activeState.forceControlMode != HIC_FORCE_CONTROL_MODE_NONE)
 	{
-		const int status = hic_get_force_control_current_commands(motorCurrentCmd, protection);
+		const int status = hic_get_force_control_current_commands(0, motorCurrentCmd, protection);
 		std::cout << "impedance current status: " << status << std::endl;
 		printVector("motorCurrentCommand", motorCurrentCmd, hic_test::kDemoJointCount);
 		printBoolVector("jointProtectionStatus", protection, hic_test::kDemoJointCount);
@@ -378,7 +378,7 @@ void printModeOutput()
 	printObservedState();
 
 	HicCartesianState cartesianState = {};
-	const int cartesianStatus = hic_get_current_cartesian_state(&cartesianState);
+	const int cartesianStatus = hic_get_current_cartesian_state(0, &cartesianState);
 	std::cout << "cartesian state status: " << cartesianStatus << std::endl;
 	if (cartesianStatus == HIC_STATUS_OK)
 	{
@@ -594,7 +594,7 @@ int main()
 		{
 			// 零力示教标准入口：
 			// 1. 先同步状态；
-			// 2. 再调用 hic_start_force_control_mode(HIC_FORCE_CONTROL_MODE_ZERO_FORCE)。
+			// 2. 再调用 hic_start_force_control_mode(0, HIC_FORCE_CONTROL_MODE_ZERO_FORCE)。
 			//
 			// 如果进入失败，通常是安全检查没通过，比如：
 			// - 当前速度过大
@@ -603,12 +603,12 @@ int main()
 			//
 			// 如果进入成功，真正的电流命令并不是在这里长期循环输出，
 			// 而是在后面的 step / run 里，每次再调用
-			// hic_get_force_control_current_commands() 计算出来。
+			// hic_get_force_control_current_commands(0) 计算出来。
 			int status = syncControllerState(lastPacket);
 			std::cout << "sync status: " << status << std::endl;
 			if (status == HIC_STATUS_OK)
 			{
-				status = hic_start_force_control_mode(HIC_FORCE_CONTROL_MODE_ZERO_FORCE);
+				status = hic_start_force_control_mode(0, HIC_FORCE_CONTROL_MODE_ZERO_FORCE);
 				std::cout << "start zero force status: " << status << std::endl;
 			}
 			printModeOutput();
@@ -630,12 +630,12 @@ int main()
 			std::cout << "sync status: " << status << std::endl;
 			if (status == HIC_STATUS_OK)
 			{
-				status = hic_capture_current_pose_as_fixed_target();
+				status = hic_capture_current_pose_as_fixed_target(0);
 				std::cout << "capture fixed pose target status: " << status << std::endl;
 			}
 			if (status == HIC_STATUS_OK)
 			{
-				status = hic_start_force_control_mode(HIC_FORCE_CONTROL_MODE_CARTESIAN_FIXED_POSE);
+				status = hic_start_force_control_mode(0, HIC_FORCE_CONTROL_MODE_CARTESIAN_FIXED_POSE);
 				std::cout << "start fixed pose mode status: " << status << std::endl;
 			}
 			printModeOutput();
@@ -647,12 +647,12 @@ int main()
 			std::cout << "sync status: " << status << std::endl;
 			if (status == HIC_STATUS_OK)
 			{
-				status = hic_capture_current_position_as_fixed_target();
+				status = hic_capture_current_position_as_fixed_target(0);
 				std::cout << "capture fixed position target status: " << status << std::endl;
 			}
 			if (status == HIC_STATUS_OK)
 			{
-				status = hic_start_force_control_mode(HIC_FORCE_CONTROL_MODE_CARTESIAN_FIXED_POSITION);
+				status = hic_start_force_control_mode(0, HIC_FORCE_CONTROL_MODE_CARTESIAN_FIXED_POSITION);
 				std::cout << "start fixed position mode status: " << status << std::endl;
 			}
 			printModeOutput();
@@ -717,22 +717,22 @@ int main()
 			//
 			// 这和很多实时控制系统的思路一致：
 			// “先发退出请求，再让控制器在后续几个周期里平稳收尾”。
-			const int mode = hic_get_force_control_mode();
+			const int mode = hic_get_force_control_mode(0);
 			HicActiveControlState activeState = {};
-			const int activeStateStatus = hic_get_active_control_state(&activeState);
+			const int activeStateStatus = hic_get_active_control_state(0, &activeState);
 			if (activeStateStatus == HIC_STATUS_OK &&
 			    mode == HIC_FORCE_CONTROL_MODE_ZERO_FORCE &&
 			    activeState.forceControlMode == HIC_FORCE_CONTROL_MODE_ZERO_FORCE)
 			{
 				std::cout << "prepare stop zero force status: "
-					  << hic_prepare_stop_force_control_mode() << std::endl;
+					  << hic_prepare_stop_force_control_mode(0) << std::endl;
 			}
 			else if (activeStateStatus == HIC_STATUS_OK &&
 				 mode != HIC_FORCE_CONTROL_MODE_NONE &&
 				 activeState.forceControlMode != HIC_FORCE_CONTROL_MODE_NONE)
 			{
 				std::cout << "prepare stop impedance status: "
-					  << hic_prepare_stop_force_control_mode() << std::endl;
+					  << hic_prepare_stop_force_control_mode(0) << std::endl;
 			}
 			else
 			{
@@ -766,7 +766,7 @@ int main()
 			//
 			// 一个很常见的使用习惯是：
 			// “测完 zero 之后 reset，再开始 fixed 的测试”。
-			std::cout << "reset status: " << hic_reset_control() << std::endl;
+			std::cout << "reset status: " << hic_reset_control(0) << std::endl;
 			continue;
 		}
 		if (command == "shutdown")

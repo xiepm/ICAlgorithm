@@ -11,10 +11,18 @@
 
 #include "hic_controller/types/hic_types.h"
 
+#include <stdint.h>
+
 #ifndef __cplusplus
 #include <stdbool.h>
 #endif
-
+typedef int8_t			RTS_IEC_BOOL;
+typedef int8_t			RTS_BOOL;
+typedef int16_t			RTS_IEC_INT;
+typedef int64_t			RTS_IEC_LINT;
+typedef double		RTS_IEC_LREAL;
+typedef uint16_t	RTS_IEC_UINT;
+typedef int32_t		RTS_IEC_DINT;
 /// @brief 高频状态输入。
 typedef struct HicStateEstimateInput
 {
