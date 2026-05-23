@@ -8,7 +8,7 @@ anthorDynamics::anthorDynamics()
 	m_gy = 0;
 	m_gz = -9.81;
 
-	m_d1 = 0.220;		//默认设置为ElfinV5的杆长参数；
+	m_d1 = 0.220;		//榛樿璁剧疆涓篍lfinV5鐨勬潌闀垮弬鏁帮紱
 	m_d2 = 0.420;
 	m_d3 = 0.180;
 	m_a1 = 0.380;

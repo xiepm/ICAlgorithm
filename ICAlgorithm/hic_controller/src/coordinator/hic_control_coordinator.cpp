@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 
 namespace hic
@@ -9,15 +10,9 @@ namespace hic
 namespace
 {
 // ============================================================
-// 0. 文件内局部工具函数
-// 说明：
 // 1. 这些函数只在本文件内部使用；
-// 2. 主要负责默认阈值、限位区宽度和通用边界整理；
-// 3. 放在最前面，便于后续成员函数直接复用。
 // ============================================================
 
-/// @brief 根据 robotType 推导该机型期望的关节数。
-/// @note 这里做的是“初始化前的快速防呆”，不是完整的机型合法性校验。
 int getExpectedJointCountFromRobotType(int robotType)
 {
 	switch (robotType)
@@ -36,32 +31,25 @@ int getExpectedJointCountFromRobotType(int robotType)
 	case 20:
 		return 7;
 	default:
-		// 未知或自定义 robotType 当前不做严格匹配，由各 adapter 自行决定是否可初始化。
 		return -1;
 	}
 }
 
-/// @brief 当某个量没有显式配置上下界时，使用一个极大值作为“近似无限”边界。
 double defaultLargeLimit()
 {
 	return 1.0e12;
 }
 
-/// @brief 返回一对上下界中绝对值较大的那个值。
-/// @note 主要用于把非对称上下界折算成“对称 maxAbs”表示。
 double maxAbsLimit(double lower, double upper)
 {
 	return std::max(std::fabs(lower), std::fabs(upper));
 }
 
-/// @brief 判断一组上下界是否被显式配置过。
-/// @note 当前工程约定：上下界同时为 0 时，表示“未配置”而不是“只允许 0”。
 bool hasExplicitRange(double lower, double upper)
 {
 	return lower != 0.0 || upper != 0.0;
 }
 
-/// @brief 获取一组上下界中可用于“绝对值阈值判断”的正值幅度。
 double configuredPositiveAbsLimit(double lower, double upper)
 {
 	if (!hasExplicitRange(lower, upper))
@@ -71,8 +59,6 @@ double configuredPositiveAbsLimit(double lower, double upper)
 	return std::max(std::fabs(lower), std::fabs(upper));
 }
 
-/// @brief 按“显式上下界优先，其次对称绝对值限幅”的规则对数值进行钳位。
-/// @note 该工具函数被力矩限幅、电流限幅等多个场景共用，以保持行为一致。
 double clampToConfiguredRange(double value, double lower, double upper, double symmetricAbs)
 {
 	if (hasExplicitRange(lower, upper))
@@ -90,8 +76,6 @@ double clampToConfiguredRange(double value, double lower, double upper, double s
 	return value;
 }
 
-/// @brief 将“上下界或对称绝对值”统一展开为 lower / upper / maxAbs 三种表示。
-/// @note 状态观测器内部同时维护这三种形式，因此 coordinator 负责在这里做一次归一化。
 void fillRangeFromBoundsOrSymmetric(
 	double lowerBound,
 	double upperBound,
@@ -126,8 +110,6 @@ void fillRangeFromBoundsOrSymmetric(
 	*maxAbsOut = defaultLargeLimit();
 }
 
-/// @brief 给 ZeroForceMode 提供一组保守的默认关节阻尼。
-/// @note 这一版以“安全稳定”为目标，不追求手感最优，因此阻尼取值偏保守。
 double defaultZeroForceDampingValue(int jointIndex)
 {
 	static const double kDefaultDamping[7] = { 1.5, 1.5, 1.2, 0.8, 0.5, 0.3, 0.2 };
@@ -138,8 +120,6 @@ double defaultZeroForceDampingValue(int jointIndex)
 	return 0.3;
 }
 
-/// @brief 计算零力模式允许进入时的关节速度阈值。
-/// @note 若上层已经配置速度限幅，则取其一部分作为进入条件；否则使用默认值。
 double computeZeroForceEntryVelocityLimit(const HicControlConfig& config, int jointIndex)
 {
 	const double configuredLimit = configuredPositiveAbsLimit(
@@ -152,22 +132,17 @@ double computeZeroForceEntryVelocityLimit(const HicControlConfig& config, int jo
 	return 0.2;
 }
 
-/// @brief 计算零力模式允许平滑退出到 IDLE 的速度阈值。
-/// @note 退出阈值设计得比进入阈值更小，避免还在明显运动时过早切回 IDLE。
 double computeZeroForceExitVelocityThreshold(const HicControlConfig& config, int jointIndex)
 {
 	return std::min(0.05, 0.5 * computeZeroForceEntryVelocityLimit(config, jointIndex));
 }
 
-/// @brief 判断关节位置限位是否配置为一个有效窗口。
 bool hasValidJointLimitWindow(const HicControlConfig& config, int jointIndex)
 {
 	return hasExplicitRange(config.lowerJointLimit[jointIndex], config.upperJointLimit[jointIndex]) &&
 		config.lowerJointLimit[jointIndex] < config.upperJointLimit[jointIndex];
 }
 
-/// @brief 计算硬限位保护区宽度。
-/// @note 进入这个区域即视为风险过高，ZeroForceMode 会直接拒绝进入或立刻报错。
 double computeHardLimitMargin(const HicControlConfig& config, int jointIndex)
 {
 	if (!hasValidJointLimitWindow(config, jointIndex))
@@ -178,8 +153,6 @@ double computeHardLimitMargin(const HicControlConfig& config, int jointIndex)
 	return std::max(0.01, std::min(0.03, 0.05 * range));
 }
 
-/// @brief 计算软限位阻尼区宽度。
-/// @note 软限位区用于“提前加阻尼”，避免关节继续朝硬限位方向逼近。
 double computeSoftLimitMargin(const HicControlConfig& config, int jointIndex)
 {
 	if (!hasValidJointLimitWindow(config, jointIndex))
@@ -190,8 +163,6 @@ double computeSoftLimitMargin(const HicControlConfig& config, int jointIndex)
 	return std::max(0.08, std::min(0.2, 0.15 * range));
 }
 
-/// @brief 根据距离限位的远近，计算软限位附加阻尼的缩放系数。
-/// @return 0 表示不在软限位区；1 表示已经逼近硬限位边缘。
 double computeSoftLimitDampingScale(double distanceToLimit, double hardMargin, double softMargin)
 {
 	if (softMargin <= hardMargin || distanceToLimit >= softMargin)
@@ -213,8 +184,6 @@ double computeSoftLimitDampingScale(double distanceToLimit, double hardMargin, d
 std::shared_ptr<HicControlCoordinator> HicControlCoordinator::create(
 	const HicControlConfig& config)
 {
-	// 工厂模式的价值在于：外部永远拿到“可直接用”或“明确失败”的对象，
-	// 避免半初始化对象在后续实时链路中被误用。
 	std::shared_ptr<HicControlCoordinator> coordinator =
 		std::make_shared<HicControlCoordinator>();
 	if (!coordinator)
@@ -241,7 +210,6 @@ HicControlCoordinator::HicControlCoordinator()
 	  commandCacheValid_(false),
 	  zeroForceStopRequested_(false)
 {
-	// 构造阶段只做“清零和默认值”工作，不做任何依赖外部配置的初始化。
 	std::memset(&config_, 0, sizeof(config_));
 	std::memset(&nullspaceConfig_, 0, sizeof(nullspaceConfig_));
 	std::memset(&jointImpedanceConfig_, 0, sizeof(jointImpedanceConfig_));
@@ -251,7 +219,6 @@ HicControlCoordinator::HicControlCoordinator()
 	std::fill(lastJointProtectionStatus_, lastJointProtectionStatus_ + HIC_MAX_JOINTS, false);
 	for (int i = 0; i < HIC_MAX_JOINTS; ++i)
 	{
-		// 退出阶段阻尼取得更大，目的是让机械臂更快衰减到静止，便于安全切回 IDLE。
 		zeroForceDamping_[i] = defaultZeroForceDampingValue(i);
 		zeroForceExitDamping_[i] = 3.0 * zeroForceDamping_[i];
 	}
@@ -267,23 +234,53 @@ HicControlCoordinator::~HicControlCoordinator()
 
 HicStatus HicControlCoordinator::initialize(const HicControlConfig& config)
 {
-	// 第一层校验只检查“尺寸和控制周期”这类结构性合法性。
+#ifdef HIC_ENABLE_DEBUG_PRINT
+	std::fprintf(stderr,
+		"[HicControlCoordinator::initialize] input jointCount=%d controlPeriod=%.9f robotType=%d\n",
+		config.jointCount,
+		config.controlPeriod,
+		config.robotType);
+#endif
+	// Comment split from executable statement.
 	if (config.jointCount <= 0 || config.jointCount > HIC_MAX_JOINTS || config.controlPeriod <= 0.0)
 	{
 		lastStatus_ = HIC_STATUS_ERROR_INVALID_PARAM;
+#ifdef HIC_ENABLE_DEBUG_PRINT
+		std::fprintf(stderr,
+			"[HicControlCoordinator::initialize] invalid base config: jointCount=%d range=(1,%d), controlPeriod=%.9f, status=%d\n",
+			config.jointCount,
+			HIC_MAX_JOINTS,
+			config.controlPeriod,
+			static_cast<int>(lastStatus_));
+#endif
 		return lastStatus_;
 	}
-	// robotType 表示机器人型号，jointCount 表示该型号实际参与控制的关节数。
-	// 初始化阶段检查两者是否匹配，防止 robotType 与 jointCount 配置不一致导致模型计算错误。
 	const int expectedJointCount = getExpectedJointCountFromRobotType(config.robotType);
 	if (expectedJointCount > 0 && config.jointCount != expectedJointCount)
 	{
+#ifdef HIC_ALLOW_DEBUG_JOINT_COUNT_MISMATCH
+#ifdef HIC_ENABLE_DEBUG_PRINT
+		std::fprintf(stderr,
+			"[HicControlCoordinator::initialize] WARNING debug bypass robotType/jointCount mismatch: robotType=%d expectedJointCount=%d actualJointCount=%d\n",
+			config.robotType,
+			expectedJointCount,
+			config.jointCount);
+#endif
+#else
 		lastStatus_ = HIC_STATUS_ERROR_INVALID_PARAM;
+#ifdef HIC_ENABLE_DEBUG_PRINT
+		std::fprintf(stderr,
+			"[HicControlCoordinator::initialize] robotType/jointCount mismatch: robotType=%d expectedJointCount=%d actualJointCount=%d status=%d\n",
+			config.robotType,
+			expectedJointCount,
+			config.jointCount,
+			static_cast<int>(lastStatus_));
+#endif
 		return lastStatus_;
+#endif
 	}
 
 	config_ = config;
-	// 初始化时总是回到一个完全确定的基线状态，避免复用旧实例时残留历史状态。
 	currentTime_ = 0.0;
 	controlMode_ = HIC_CONTROL_MODE_IDLE;
 	forceControlMode_ = HIC_FORCE_CONTROL_MODE_NONE;
@@ -304,6 +301,11 @@ HicStatus HicControlCoordinator::initialize(const HicControlConfig& config)
 	if (status != HIC_STATUS_OK)
 	{
 		lastStatus_ = status;
+#ifdef HIC_ENABLE_DEBUG_PRINT
+		std::fprintf(stderr,
+			"[HicControlCoordinator::initialize] kinematicsAdapter.initialize failed status=%d\n",
+			static_cast<int>(status));
+#endif
 		return status;
 	}
 
@@ -311,6 +313,11 @@ HicStatus HicControlCoordinator::initialize(const HicControlConfig& config)
 	if (status != HIC_STATUS_OK)
 	{
 		lastStatus_ = status;
+#ifdef HIC_ENABLE_DEBUG_PRINT
+		std::fprintf(stderr,
+			"[HicControlCoordinator::initialize] dynamicsAdapter.initialize failed status=%d\n",
+			static_cast<int>(status));
+#endif
 		return status;
 	}
 
@@ -318,6 +325,11 @@ HicStatus HicControlCoordinator::initialize(const HicControlConfig& config)
 	if (status != HIC_STATUS_OK)
 	{
 		lastStatus_ = status;
+#ifdef HIC_ENABLE_DEBUG_PRINT
+		std::fprintf(stderr,
+			"[HicControlCoordinator::initialize] dynamicsAdapter.setRobotKinematicParameters failed status=%d\n",
+			static_cast<int>(status));
+#endif
 		return status;
 	}
 
@@ -325,6 +337,11 @@ HicStatus HicControlCoordinator::initialize(const HicControlConfig& config)
 	if (status != HIC_STATUS_OK)
 	{
 		lastStatus_ = status;
+#ifdef HIC_ENABLE_DEBUG_PRINT
+		std::fprintf(stderr,
+			"[HicControlCoordinator::initialize] impedanceCore.initialize failed status=%d\n",
+			static_cast<int>(status));
+#endif
 		return status;
 	}
 
@@ -332,6 +349,11 @@ HicStatus HicControlCoordinator::initialize(const HicControlConfig& config)
 	if (status != HIC_STATUS_OK)
 	{
 		lastStatus_ = status;
+#ifdef HIC_ENABLE_DEBUG_PRINT
+		std::fprintf(stderr,
+			"[HicControlCoordinator::initialize] jointImpedanceCore.initialize failed status=%d\n",
+			static_cast<int>(status));
+#endif
 		return status;
 	}
 	jointImpedanceCore_.reset();
@@ -339,6 +361,11 @@ HicStatus HicControlCoordinator::initialize(const HicControlConfig& config)
 	if (status != HIC_STATUS_OK)
 	{
 		lastStatus_ = status;
+#ifdef HIC_ENABLE_DEBUG_PRINT
+		std::fprintf(stderr,
+			"[HicControlCoordinator::initialize] jointImpedanceCore.setConfig failed status=%d\n",
+			static_cast<int>(status));
+#endif
 		return status;
 	}
 
@@ -348,6 +375,11 @@ HicStatus HicControlCoordinator::initialize(const HicControlConfig& config)
 	if (status != HIC_STATUS_OK)
 	{
 		lastStatus_ = status;
+#ifdef HIC_ENABLE_DEBUG_PRINT
+		std::fprintf(stderr,
+			"[HicControlCoordinator::initialize] robotStateObserver.initialize failed status=%d\n",
+			static_cast<int>(status));
+#endif
 		return status;
 	}
 
@@ -355,26 +387,33 @@ HicStatus HicControlCoordinator::initialize(const HicControlConfig& config)
 	if (status != HIC_STATUS_OK)
 	{
 		lastStatus_ = status;
+#ifdef HIC_ENABLE_DEBUG_PRINT
+		std::fprintf(stderr,
+			"[HicControlCoordinator::initialize] forceObserver.initialize failed status=%d\n",
+			static_cast<int>(status));
+#endif
 		return status;
 	}
 
 	initialized_ = true;
 	lastStatus_ = HIC_STATUS_OK;
+#ifdef HIC_ENABLE_DEBUG_PRINT
+	std::fprintf(stderr,
+		"[HicControlCoordinator::initialize] success jointCount=%d controlPeriod=%.9f robotType=%d\n",
+		config_.jointCount,
+		config_.controlPeriod,
+		config_.robotType);
+#endif
 	return lastStatus_;
 }
 
 // ============================================================
 // 2. 配置构造与同步
-// 说明：
-// 1. 将 coordinator 的总配置投影成状态观测器可消费的格式；
-// 2. 这部分虽然不直接输出控制命令，但会影响状态有效性与安全检查。
 // ============================================================
 
 void HicControlCoordinator::buildDefaultStateObserverConfig(
 	HicRobotStateObserverConfig* configOut) const
 {
-	// 这个函数的职责不是“生成控制参数”，而是把 coordinator 的统一配置
-	// 映射成状态观测器能直接消费的配置格式。
 	if (!configOut)
 	{
 		return;
@@ -393,8 +432,6 @@ void HicControlCoordinator::buildDefaultStateObserverConfig(
 
 	for (int i = 0; i < HIC_MAX_JOINTS; ++i)
 	{
-		// 默认关闭滤波，因此 alpha 先都设成 1.0；
-		// 如果后续上层打开滤波，这些 alpha 也依然是合法值。
 		stateConfig.positionFilterAlpha[i] = 1.0;
 		stateConfig.velocityFilterAlpha[i] = 1.0;
 		stateConfig.accelerationFilterAlpha[i] = 1.0;
@@ -448,8 +485,7 @@ HicStatus HicControlCoordinator::updateExternalTorqueEstimateFromRobotState()
 	// 该函数把“电流反推外力矩”链路接到交互力观测器：
 	// 1. robotStateObserver_ 提供滤波后的 q/dq 和由电机电流估算的关节力矩；
 	// 2. dynamicsAdapter_ 计算当前状态下的模型力矩；
-	// 3. 二者相减得到外界作用在关节上的估计力矩；
-	// 4. forceObserver_ 对该估计值做外力矩低通滤波，供关节阻抗等模式读取。
+	// Comment split from executable statement.
 	if (!initialized_)
 	{
 		return HIC_STATUS_ERROR_INIT;
@@ -458,8 +494,7 @@ HicStatus HicControlCoordinator::updateExternalTorqueEstimateFromRobotState()
 	double q[HIC_MAX_JOINTS] = { 0.0 };
 	double dq[HIC_MAX_JOINTS] = { 0.0 };
 	double motorEstimatedTorque[HIC_MAX_JOINTS] = { 0.0 };
-
-	// Step 1: 从状态观测器读取内部 SI 单位的滤波状态。
+	// Step 1: read filtered state from the state observer.
 	HicStatus status = robotStateObserver_.getFilteredJointPosition(q);
 	if (status != HIC_STATUS_OK)
 	{
@@ -475,9 +510,7 @@ HicStatus HicControlCoordinator::updateExternalTorqueEstimateFromRobotState()
 	{
 		return status;
 	}
-
-	// Step 2: 计算需要从电机估计力矩中扣掉的模型力矩。
-	// 当前重力项必须可用；科氏/摩擦后端若尚未实现，则保持零向量继续运行。
+	// Step 2: compute model torques to subtract from motor-estimated torque.
 	double gravityTorque[HIC_MAX_JOINTS] = { 0.0 };
 	double coriolisTorque[HIC_MAX_JOINTS] = { 0.0 };
 	double frictionTorque[HIC_MAX_JOINTS] = { 0.0 };
@@ -499,8 +532,7 @@ HicStatus HicControlCoordinator::updateExternalTorqueEstimateFromRobotState()
 	{
 		return status;
 	}
-
-	// Step 3: 外力矩估计 = 电机电流反推关节力矩 - 模型补偿力矩。
+	// Step 3: external torque estimate = motor estimate - model torque.
 	double jointExternalTorque[HIC_MAX_JOINTS] = { 0.0 };
 	for (int i = 0; i < config_.jointCount; ++i)
 	{
@@ -508,14 +540,14 @@ HicStatus HicControlCoordinator::updateExternalTorqueEstimateFromRobotState()
 		jointExternalTorque[i] = motorEstimatedTorque[i] - modelTorque;
 	}
 
-	// Step 4: 送入交互力观测器，统一使用 externalTorqueFilterAlpha 做滤波。
+	// Comment split from executable statement.
+
 	return forceObserver_.updateJointExternalTorque(jointExternalTorque);
 }
 
 HicStatus HicControlCoordinator::rebuildStateObserverConfig()
 {
-	// 当外部通过 setXXXLimits / setMotorTorqueConversionParameters 等接口修改配置后，
-	// 需要把和观测器相关的那部分重新同步进去，否则状态有效性检查会滞后。
+	// Comment split from executable statement.
 	if (!initialized_)
 	{
 		lastStatus_ = HIC_STATUS_ERROR_INIT;
@@ -563,7 +595,6 @@ HicStatus HicControlCoordinator::rebuildStateObserverConfig()
 }
 
 // ============================================================
-// 3. 高频状态输入
 // ============================================================
 
 HicStatus HicControlCoordinator::updateRobotState(
@@ -571,26 +602,62 @@ HicStatus HicControlCoordinator::updateRobotState(
 	const double* motorCurrent,
 	double currentTime)
 {
+#ifdef HIC_ENABLE_DEBUG_PRINT
+	static int debug_update_state_count = 0;
+	const bool should_debug_print = ((debug_update_state_count++ % 1000) == 0);
+	if (should_debug_print)
+	{
+		std::fprintf(stderr,
+			"[HicControlCoordinator::updateRobotState] entered, initialized=%d jointCount=%d t=%.6f\n",
+			initialized_ ? 1 : 0,
+			config_.jointCount,
+			currentTime);
+	}
+#endif
 	if (!initialized_)
 	{
 		lastStatus_ = HIC_STATUS_ERROR_INIT;
+#ifdef HIC_ENABLE_DEBUG_PRINT
+		if (should_debug_print)
+		{
+			std::fprintf(stderr,
+				"[HicControlCoordinator::updateRobotState] return status=%d before observer\n",
+				static_cast<int>(lastStatus_));
+		}
+#endif
 		return lastStatus_;
 	}
 
 	const HicStatus status = robotStateObserver_.updateRobotState(
 		jointPosition, motorCurrent, currentTime);
+#ifdef HIC_ENABLE_DEBUG_PRINT
+	if (should_debug_print)
+	{
+		std::fprintf(stderr,
+			"[HicControlCoordinator::updateRobotState] robotStateObserver.updateRobotState status=%d\n",
+			static_cast<int>(status));
+	}
+#endif
 	if (status == HIC_STATUS_OK)
 	{
-		// 高频状态输入成功后立即刷新外力矩估计。
-		// 这样后续关节阻抗模式启用外力矩补偿时，可以直接从 forceObserver_ 读取滤波后的 tau_ext_hat。
+		// Refresh external torque estimate after a successful state update.
 		const HicStatus externalTorqueStatus = updateExternalTorqueEstimateFromRobotState();
+#ifdef HIC_ENABLE_DEBUG_PRINT
+		if (should_debug_print)
+		{
+			std::fprintf(stderr,
+				"[HicControlCoordinator::updateRobotState] updateExternalTorqueEstimateFromRobotState status=%d\n",
+				static_cast<int>(externalTorqueStatus));
+		}
+#endif
 		if (externalTorqueStatus != HIC_STATUS_OK)
 		{
 			lastStatus_ = externalTorqueStatus;
 			return lastStatus_;
 		}
 
-		// 一旦底层状态更新成功，依赖该状态的控制命令缓存就不再可信，必须失效。
+		// Comment split from executable statement.
+
 		currentTime_ = currentTime;
 		invalidateCommandCache();
 	}
@@ -613,7 +680,6 @@ HicStatus HicControlCoordinator::updateJointState(
 		jointPosition, jointVelocity, jointAcceleration);
 	if (status == HIC_STATUS_OK)
 	{
-		// 这个接口不显式传时间戳，因此 coordinator 用控制周期做单步推进。
 		currentTime_ += config_.controlPeriod;
 		invalidateCommandCache();
 	}
@@ -640,15 +706,11 @@ HicStatus HicControlCoordinator::updateJointMeasuredTorque(const double* jointMe
 
 // ============================================================
 // 4. 模式管理
-// 说明：
-// 1. 顶层只区分 FORCE_CONTROL / IDLE；
 // 2. 零力示教、定点阻抗、轨迹阻抗都属于 FORCE_CONTROL 内部子模式；
-// 3. 其中零力模式进入和退出带有额外的安全语义。
 // ============================================================
 
 HicStatus HicControlCoordinator::setControlMode(HicControlMode mode)
 {
-	// 直接模式切换只维护顶层状态机和缓存，不做专门的安全判断。
 	controlMode_ = mode;
 	if (mode != HIC_CONTROL_MODE_FORCE_CONTROL)
 	{
@@ -665,20 +727,12 @@ HicStatus HicControlCoordinator::startForceControlZeroForceMode()
 	// =========================
 	// 零力示教模式入口
 	// =========================
-	// 这个函数的职责不是“立即产生零力输出”，而是负责把系统安全地切换到
-	// HIC_CONTROL_MODE_FORCE_CONTROL + HIC_FORCE_CONTROL_MODE_ZERO_FORCE 状态。
 	//
 	// 可以把它理解成零力示教的“准入门禁”：
 	// 1. coordinator 本身必须已经初始化；
-	// 2. 机器人当前状态必须已经更新且有效；
-	// 3. 当前速度不能过大；
 	// 4. 当前位置不能已经逼近硬限位；
-	// 5. 电流-力矩换算参数必须有效。
 	//
-	// 只有这些条件都满足时，后续 computeZeroForceCurrentCommand() 才有意义。
-	// 否则即便强行进入模式，也可能在第一周期就输出不安全或不可解释的命令。
 	// ZeroForceMode 的入口尽量保守：
-	// 即便上层已经显式调用 start，也必须再次做运行条件校验。
 	if (!initialized_)
 	{
 		lastStatus_ = HIC_STATUS_ERROR_INIT;
@@ -689,12 +743,8 @@ HicStatus HicControlCoordinator::startForceControlZeroForceMode()
 	const HicStatus status = validateZeroForceEntry(&state);
 	if (status != HIC_STATUS_OK)
 	{
-		// 进入失败时显式退回 IDLE，语义上表示：
-		// “这次零力示教请求没有被接受，系统仍处于空闲状态”。
 		//
 			// 这里不保留任何“半进入”痕迹，避免上层误以为当前已经进入零力模式，
-			// 但实际上内部条件并不满足。
-			// 进入失败时强制回到 IDLE，避免对外留下“似乎已经部分进入零力模式”的歧义状态。
 			controlMode_ = HIC_CONTROL_MODE_IDLE;
 			forceControlMode_ = HIC_FORCE_CONTROL_MODE_NONE;
 			zeroForceStopRequested_ = false;
@@ -706,8 +756,6 @@ HicStatus HicControlCoordinator::startForceControlZeroForceMode()
 	forceControlMode_ = HIC_FORCE_CONTROL_MODE_ZERO_FORCE;
 	zeroForceStopRequested_ = false;
 	// 一旦模式切换成功，后续输出语义就变了：
-	// 同样的输入状态，此时请求的是“零力示教电流命令”而不是其他模式输出。
-	// 因此需要让历史命令缓存全部失效，强制下一次按零力模式重新计算。
 	invalidateCommandCache();
 	lastStatus_ = HIC_STATUS_OK;
 	return lastStatus_;
@@ -716,18 +764,11 @@ HicStatus HicControlCoordinator::startForceControlZeroForceMode()
 HicStatus HicControlCoordinator::prepareStopForceControlMode()
 {
 	// =========================
-	// 零力示教模式退出准备
 	// =========================
-	// 这个函数故意不直接把模式切回 IDLE。
 	//
-	// 原因是：零力示教退出时如果机械臂还在明显运动，立刻切 IDLE 可能让输出瞬间消失，
 	// 从而造成不够平滑的行为。当前第一版采用一个更保守的策略：
-	// 1. 先打上 zeroForceStopRequested_ 标记；
 	// 2. 后续控制周期继续输出“带更强阻尼的零力命令”；
-	// 3. 当所有关节速度都降到阈值以内，再真正切回 IDLE。
-	// 这里不立即切 IDLE，而是打标记。
 	// 真正退出发生在 computeZeroForceCurrentCommand() 里，
-	// 因为只有那里才能结合当前速度判断是否已经足够静止。
 	if (!initialized_)
 	{
 		lastStatus_ = HIC_STATUS_ERROR_INIT;
@@ -827,10 +868,7 @@ HicStatus HicControlCoordinator::startForceControlJointImpedanceMode()
 }
 
 // ============================================================
-// 5. 控制参数与目标配置
-// 说明：
 // 1. 这部分负责阻抗参数、动力学参数、安全边界和传感器配置；
-// 2. 配置变化通常不会立即输出命令，但会影响后续控制求解。
 // ============================================================
 
 HicStatus HicControlCoordinator::setCartesianImpedanceGains(const HicImpedanceGains& gains)
@@ -1027,7 +1065,6 @@ HicStatus HicControlCoordinator::setDynamicsLinearParameters(const double* dynam
 	lastStatus_ = dynamicsAdapter_.setDynamicParameters(config_.dynamicParams);
 	if (lastStatus_ == HIC_STATUS_OK)
 	{
-		// 动力学参数变化会影响重力补偿等模型项，因此必须让命令缓存失效。
 		invalidateCommandCache();
 	}
 	return lastStatus_;
@@ -1090,14 +1127,55 @@ HicStatus HicControlCoordinator::setMotorTorqueConversionParameters(
 
 	for (int i = 0; i < config_.jointCount; ++i)
 	{
-		config_.torqueConstant[i] = torqueConstant[i];
-		config_.gearRatio[i] = gearRatio[i];
-		config_.transmissionEfficiency[i] = transmissionEfficiency[i];
+		double kt = torqueConstant[i];
+		double ratio = gearRatio[i];
+		double efficiency = transmissionEfficiency[i];
+#ifdef HIC_ALLOW_DEBUG_PARAM_VALIDATION_BYPASS
+		if (!std::isfinite(kt) || kt <= 0.0)
+		{
+#ifdef HIC_ENABLE_DEBUG_PRINT
+			std::fprintf(stderr,
+				"[HicControlCoordinator::setMotorTorqueConversionParameters] WARNING debug bypass torqueConstant joint=%d input=%.6f use=1.0\n",
+				i,
+				torqueConstant[i]);
+#endif
+			kt = 1.0;
+		}
+		if (!std::isfinite(ratio) || ratio <= 0.0)
+		{
+#ifdef HIC_ENABLE_DEBUG_PRINT
+			std::fprintf(stderr,
+				"[HicControlCoordinator::setMotorTorqueConversionParameters] WARNING debug bypass gearRatio joint=%d input=%.6f use=1.0\n",
+				i,
+				gearRatio[i]);
+#endif
+			ratio = 1.0;
+		}
+		if (!std::isfinite(efficiency) || efficiency <= 0.0)
+		{
+#ifdef HIC_ENABLE_DEBUG_PRINT
+			std::fprintf(stderr,
+				"[HicControlCoordinator::setMotorTorqueConversionParameters] WARNING debug bypass transmissionEfficiency joint=%d input=%.6f use=1.0\n",
+				i,
+				transmissionEfficiency[i]);
+#endif
+			efficiency = 1.0;
+		}
+#else
+		if (!std::isfinite(kt) || !std::isfinite(ratio) || !std::isfinite(efficiency) ||
+			kt <= 0.0 || ratio <= 0.0 || efficiency <= 0.0)
+		{
+			lastStatus_ = HIC_STATUS_ERROR_INVALID_PARAM;
+			return lastStatus_;
+		}
+#endif
+		config_.torqueConstant[i] = kt;
+		config_.gearRatio[i] = ratio;
+		config_.transmissionEfficiency[i] = efficiency;
 	}
 	lastStatus_ = rebuildStateObserverConfig();
 	if (lastStatus_ == HIC_STATUS_OK)
 	{
-		// 既然换算参数变了，观测器里的估计力矩和控制输出电流都应认为需要重算。
 		invalidateCommandCache();
 	}
 	return lastStatus_;
@@ -1215,16 +1293,47 @@ HicStatus HicControlCoordinator::setMotorCurrentLimits(
 		return lastStatus_;
 	}
 
+	constexpr double kDebugDefaultMotorCurrentLimit = 1000.0;
 	for (int i = 0; i < config_.jointCount; ++i)
 	{
-		config_.lowerMotorCurrent[i] = lowerLimits[i];
-		config_.upperMotorCurrent[i] = upperLimits[i];
-		config_.maxJointCurrent[i] = maxAbsLimit(lowerLimits[i], upperLimits[i]);
+		double lower = lowerLimits[i];
+		double upper = upperLimits[i];
+
+#ifdef HIC_ALLOW_DEBUG_PARAM_VALIDATION_BYPASS
+		const bool invalidLimit =
+			!std::isfinite(lower) ||
+			!std::isfinite(upper) ||
+			lower > upper ||
+			(lower == 0.0 && upper == 0.0);
+		if (invalidLimit)
+		{
+#ifdef HIC_ENABLE_DEBUG_PRINT
+			std::fprintf(stderr,
+				"[HicControlCoordinator::setMotorCurrentLimits] WARNING debug bypass invalid current limit joint=%d input=[%.6f, %.6f], use=[%.6f, %.6f]\n",
+				i,
+				lowerLimits[i],
+				upperLimits[i],
+				-kDebugDefaultMotorCurrentLimit,
+				kDebugDefaultMotorCurrentLimit);
+#endif
+			lower = -kDebugDefaultMotorCurrentLimit;
+			upper = kDebugDefaultMotorCurrentLimit;
+		}
+#else
+		if (!std::isfinite(lower) || !std::isfinite(upper) || lower > upper)
+		{
+			lastStatus_ = HIC_STATUS_ERROR_INVALID_PARAM;
+			return lastStatus_;
+		}
+#endif
+
+		config_.lowerMotorCurrent[i] = lower;
+		config_.upperMotorCurrent[i] = upper;
+		config_.maxJointCurrent[i] = maxAbsLimit(lower, upper);
 	}
 	lastStatus_ = rebuildStateObserverConfig();
 	return lastStatus_;
 }
-
 HicStatus HicControlCoordinator::updateJointExternalTorque(const double* jointExternalTorque)
 {
 	if (!initialized_)
@@ -1236,7 +1345,6 @@ HicStatus HicControlCoordinator::updateJointExternalTorque(const double* jointEx
 	const HicStatus status = forceObserver_.updateJointExternalTorque(jointExternalTorque);
 	if (status == HIC_STATUS_OK)
 	{
-		// 即便当前 ZeroForceMode 不使用该量，也保持“感知输入改变 => 缓存失效”的统一语义。
 		invalidateCommandCache();
 	}
 	lastStatus_ = status;
@@ -1343,12 +1451,6 @@ HicStatus HicControlCoordinator::getTorqueSensorFaultStatus(bool* faultStatus) c
 }
 
 // ============================================================
-// 6. ZeroForceMode 主链路
-// 说明：
-// 1. 先做进入/运行安全校验；
-// 2. 再计算重力补偿与速度阻尼；
-// 3. 最后叠加软/硬限位保护和统一限幅；
-// 4. 若上层请求电流环输出，再做力矩转电流。
 // ============================================================
 
 HicStatus HicControlCoordinator::computeZeroForceTorqueCommand(
@@ -1356,29 +1458,20 @@ HicStatus HicControlCoordinator::computeZeroForceTorqueCommand(
 	bool* jointProtectionStatus)
 {
 	// ==============================
-	// 零力示教主控制周期：力矩环版本
 	// ==============================
-	// 这是零力示教的“核心求解”版本。
-	// 它输出的是关节力矩命令，适合：
 	// 1. 调试零力控制律本身；
 	// 2. 仿真或支持直接力矩驱动的执行器；
-	// 3. 供电流环版本复用同一套主逻辑。
 	//
-	// 当前第一版的控制逻辑刻意保持简单且保守：
-	// 1. 状态校验
 	// 2. 重力补偿
 	// 3. 速度阻尼
-	// 4. 软/硬限位保护
 	// 5. 力矩安全限幅
 	//
 	// 它不做：
 	// - externalWrench 解释
-	// - 末端六维力引导
 	// - targetPose 跟踪
 	// - 复杂摩擦补偿
 	//
 	// 因此，这里实现的是“安全优先的关节层零力示教”，
-	// 而不是更复杂的交互控制器。
 	if (!initialized_)
 	{
 		lastStatus_ = HIC_STATUS_ERROR_INIT;
@@ -1396,7 +1489,6 @@ HicStatus HicControlCoordinator::computeZeroForceTorqueCommand(
 	if (controlMode_ != HIC_CONTROL_MODE_FORCE_CONTROL ||
 	    forceControlMode_ != HIC_FORCE_CONTROL_MODE_ZERO_FORCE)
 	{
-		// 只有真正处于零力模式时才允许取零力输出，避免接口语义混乱。
 		lastStatus_ = HIC_STATUS_ERROR_INVALID_PARAM;
 		return lastStatus_;
 	}
@@ -1405,9 +1497,6 @@ HicStatus HicControlCoordinator::computeZeroForceTorqueCommand(
 	HicStatus status = validateZeroForceEntry(&state);
 	if (status != HIC_STATUS_OK)
 	{
-		// 零力模式不仅在 start 时检查一次，
-		// 在每个控制周期都会再次检查当前状态是否仍然满足运行条件。
-		// 这样可以覆盖“进入后状态突变”的情况，例如速度突然过大、状态失效等。
 		clearTorqueCommand(jointTorqueCommand);
 		lastStatus_ = status;
 		return lastStatus_;
@@ -1415,13 +1504,8 @@ HicStatus HicControlCoordinator::computeZeroForceTorqueCommand(
 
 	if (zeroForceStopRequested_ && isZeroForceExitReady(state.jointVelocity))
 	{
-		// 退出条件满足时，不再继续输出渐退命令，而是正式结束零力模式。
 		// 当前处理策略是：
-		// 1. controlMode_ 切回 IDLE；
-		// 2. 清除 stop 标记；
 		// 3. 使缓存失效；
-		// 4. 当前周期输出保持为零。
-		// 只有在退出标记已设置且所有关节速度都足够低时，才真正退回 IDLE。
 		controlMode_ = HIC_CONTROL_MODE_IDLE;
 		forceControlMode_ = HIC_FORCE_CONTROL_MODE_NONE;
 		zeroForceStopRequested_ = false;
@@ -1434,9 +1518,6 @@ HicStatus HicControlCoordinator::computeZeroForceTorqueCommand(
 	{
 		// 零力示教的第一主项是重力补偿：
 		// 目标不是“把关节力矩做成 0”，而是尽量抵消机器人自身重力造成的静态负担，
-		// 让人工拖动时不需要额外扛住机械臂重量。
-		// 第一版零力示教把“重力补偿 + 阻尼”作为唯一主控制律，
-		// 不引入额外外力引导或末端阻抗。
 		status = dynamicsAdapter_.computeGravityTorque(state.jointPosition, jointTorqueCommand);
 		if (status != HIC_STATUS_OK)
 		{
@@ -1449,17 +1530,11 @@ HicStatus HicControlCoordinator::computeZeroForceTorqueCommand(
 	for (int i = 0; i < config_.jointCount; ++i)
 	{
 		const double damping = zeroForceStopRequested_ ? zeroForceExitDamping_[i] : zeroForceDamping_[i];
-		// 第二主项是关节速度阻尼：
 		// jointTorqueCommand += -d * dq
 		//
 		// 它的作用不是“把机器人拉回某个位置”，
-		// 而是抑制自由漂移和过快运动，让零力示教更稳定、更安全。
 		//
-		// 当 prepareStopZeroForceMode() 已经被调用时，
-		// 这里会自动切换到更大的退出阻尼，帮助机械臂更快停稳。
-		// 阻尼项始终与速度反向，用于吸收运动能量并抑制漂移。
 		jointTorqueCommand[i] += -damping * state.jointVelocity[i];
-		// TODO(xpm): 如后续零力手感确有需求，再补充简单摩擦补偿；当前版本优先保持可预测的安全行为。
 	}
 
 	status = applyZeroForceSoftBoundaryDamping(
@@ -1471,7 +1546,6 @@ HicStatus HicControlCoordinator::computeZeroForceTorqueCommand(
 	if (status == HIC_STATUS_ERROR_JOINT_LIMIT)
 	{
 		// 一旦已经进入硬限位保护区，就不再尝试继续输出“修正型命令”，
-		// 而是直接清零输出并上报关节限位错误。
 		clearTorqueCommand(jointTorqueCommand);
 		lastStatus_ = status;
 		return lastStatus_;
@@ -1481,8 +1555,6 @@ HicStatus HicControlCoordinator::computeZeroForceTorqueCommand(
 		state.jointPosition, jointTorqueCommand, jointProtectionStatus);
 	if (safetyStatus != HIC_STATUS_OK && safetyStatus != HIC_STATUS_ERROR_CURRENT_LIMIT)
 	{
-		// applySafetyLimits() 负责通用力矩安全链路。
-		// 如果这里返回的是更严重的错误，就直接终止本周期输出。
 		clearTorqueCommand(jointTorqueCommand);
 		lastStatus_ = safetyStatus;
 		return lastStatus_;
@@ -1505,12 +1577,9 @@ HicStatus HicControlCoordinator::computeZeroForceCurrentCommand(
 	bool* jointProtectionStatus)
 {
 	// ==============================
-	// 零力示教主控制周期：电流环版本
 	// ==============================
 	// 这里不重新实现一套零力逻辑，而是复用上面的力矩环主链路：
-	// 1. 先得到本周期安全限幅后的关节力矩命令；
 	// 2. 再把关节力矩换算成电机电流；
-	// 3. 最后做一层电流兜底限幅。
 	if (!initialized_)
 	{
 		lastStatus_ = HIC_STATUS_ERROR_INIT;
@@ -1537,8 +1606,6 @@ HicStatus HicControlCoordinator::computeZeroForceCurrentCommand(
 	const HicStatus convertStatus = convertTorqueToCurrent(jointTorqueCommand, motorCurrentCommand);
 	if (convertStatus != HIC_STATUS_OK)
 	{
-		// 只要力矩-电流换算失败，就说明执行器参数或输入存在问题，
-		// 继续下发电流命令是不安全的，因此本周期清零输出。
 		clearCurrentCommand(motorCurrentCommand);
 		lastStatus_ = convertStatus;
 		return lastStatus_;
@@ -1547,10 +1614,7 @@ HicStatus HicControlCoordinator::computeZeroForceCurrentCommand(
 	HicStatus currentStatus = status;
 	for (int i = 0; i < config_.jointCount; ++i)
 	{
-		// 最后一层逐关节电流兜底保护。
-		// 这样即便前面某一步未来被改动，最终输出到执行器前仍有一层明确的电流边界。
 		// convertTorqueToCurrent() 已经做过一轮电流限幅；
-		// 这里再兜底一次，是为了满足“异常时输出绝不越界”的保守策略。
 		const double limitedCurrent = clampToConfiguredRange(
 			motorCurrentCommand[i],
 			config_.lowerMotorCurrent[i],
@@ -1567,7 +1631,6 @@ HicStatus HicControlCoordinator::computeZeroForceCurrentCommand(
 
 	lastComputedVersion_ = commandInputVersion_;
 	commandCacheValid_ = true;
-	// 将本周期结果缓存下来，便于调试读取和与其他输出接口共享。
 	lastStatus_ = currentStatus;
 	return lastStatus_;
 }
@@ -1575,7 +1638,6 @@ HicStatus HicControlCoordinator::computeZeroForceCurrentCommand(
 HicStatus HicControlCoordinator::validateZeroForceEntry(HicRobotState* stateOut) const
 {
 	// 这个函数同时服务于“进入时校验”和“运行时持续校验”：
-	// 只要状态已经不再满足零力模式的基本安全条件，就直接报错。
 	if (!stateOut)
 	{
 		return HIC_STATUS_ERROR_NULL_POINTER;
@@ -1595,7 +1657,6 @@ HicStatus HicControlCoordinator::validateZeroForceEntry(HicRobotState* stateOut)
 
 	for (int i = 0; i < config_.jointCount; ++i)
 	{
-		// 进入速度阈值偏保守，避免机械臂在明显运动中切入零力模式。
 		if (std::fabs(stateOut->jointVelocity[i]) > computeZeroForceEntryVelocityLimit(config_, i))
 		{
 			return HIC_STATUS_ERROR_ROBOT_STATE;
@@ -1603,7 +1664,6 @@ HicStatus HicControlCoordinator::validateZeroForceEntry(HicRobotState* stateOut)
 
 		if (hasValidJointLimitWindow(config_, i))
 		{
-			// 靠近硬限位时直接拒绝进入，优先安全，不尝试“贴着边缘工作”。
 			const double lower = config_.lowerJointLimit[i];
 			const double upper = config_.upperJointLimit[i];
 			const double hardMargin = computeHardLimitMargin(config_, i);
@@ -1621,7 +1681,6 @@ HicStatus HicControlCoordinator::validateZeroForceEntry(HicRobotState* stateOut)
 			!std::isfinite(transmissionEfficiency) || torqueConstant <= 0.0 ||
 			gearRatio <= 0.0 || transmissionEfficiency <= 0.0)
 		{
-			// 电流换算参数无效意味着后面无法安全地产生执行器输出，因此直接判失败。
 			return HIC_STATUS_ERROR_INVALID_PARAM;
 		}
 	}
@@ -1658,7 +1717,6 @@ HicStatus HicControlCoordinator::applyZeroForceSoftBoundaryDamping(
 
 		if (q <= lower + hardMargin || q >= upper - hardMargin)
 		{
-			// 一旦进入硬限位保护区，ZeroForceMode 不再尝试“救回来”，而是立即报错停输出。
 			jointProtectionStatus[i] = true;
 			jointTorqueCommand[i] = 0.0;
 			status = HIC_STATUS_ERROR_JOINT_LIMIT;
@@ -1672,7 +1730,6 @@ HicStatus HicControlCoordinator::applyZeroForceSoftBoundaryDamping(
 
 		if (dq < 0.0)
 		{
-			// 仅当速度方向继续逼近下限时，才叠加反向阻尼；远离限位时不做多余干预。
 			const double scale = computeSoftLimitDampingScale(lowerDistance, hardMargin, softMargin);
 			if (scale > 0.0)
 			{
@@ -1681,7 +1738,6 @@ HicStatus HicControlCoordinator::applyZeroForceSoftBoundaryDamping(
 		}
 		if (dq > 0.0)
 		{
-			// 同理，仅对继续逼近上限的运动加阻尼。
 			const double scale = computeSoftLimitDampingScale(upperDistance, hardMargin, softMargin);
 			if (scale > 0.0)
 			{
@@ -1695,7 +1751,6 @@ HicStatus HicControlCoordinator::applyZeroForceSoftBoundaryDamping(
 
 bool HicControlCoordinator::isZeroForceExitReady(const double* jointVelocity) const
 {
-	// 平滑退出的判据很简单：所有关节速度都降到阈值以下。
 	if (!jointVelocity)
 	{
 		return false;
@@ -1712,10 +1767,7 @@ bool HicControlCoordinator::isZeroForceExitReady(const double* jointVelocity) co
 }
 
 // ============================================================
-// 7. 笛卡尔阻抗控制输出链路
-// 说明：
 // 1. 支持输出关节力矩和电机电流两种形式；
-// 2. 共享同一轮阻抗求解结果和缓存机制。
 // ============================================================
 
 HicStatus HicControlCoordinator::computeCartesianImpedanceTorqueCommand(
@@ -1747,7 +1799,6 @@ HicStatus HicControlCoordinator::computeCartesianImpedanceTorqueCommand(
 
 	if (commandCacheValid_ && lastComputedVersion_ == commandInputVersion_)
 	{
-		// 若本周期输入没有变化，则复用上一轮已计算结果，避免重复做 FK/Jacobian/动力学求解。
 		for (int i = 0; i < config_.jointCount; ++i)
 		{
 			jointTorqueCommand[i] = lastJointTorqueCommand_[i];
@@ -1805,8 +1856,7 @@ HicStatus HicControlCoordinator::computeForceControlTorqueCommand(
 	double* jointTorqueCommand,
 	bool* jointProtectionStatus)
 {
-	// 力控模式的统一力矩分发入口。
-	// 外部 hic_get_force_control_torque_commands() 只调用这里，具体算法由 forceControlMode_ 决定。
+	// Comment split from executable statement.
 	if (!initialized_)
 	{
 		lastStatus_ = HIC_STATUS_ERROR_INIT;
@@ -1841,10 +1891,6 @@ HicStatus HicControlCoordinator::computeForceControlCurrentCommand(
 	double* motorCurrentCommand,
 	bool* jointProtectionStatus)
 {
-	// 力控模式的统一电流输出入口。
-	// 所有力控子模式先走 computeForceControlTorqueCommand() 得到关节力矩，
-	// 再统一复用 convertTorqueToCurrent()，避免在电流层为每个模式重复写分支。
-	// 对关节阻抗模式来说，本函数的完整路径是：
 	// hic_get_force_control_current_commands()
 	//   -> computeForceControlCurrentCommand()
 	//   -> computeForceControlTorqueCommand()
@@ -1852,45 +1898,44 @@ HicStatus HicControlCoordinator::computeForceControlCurrentCommand(
 	//   -> convertTorqueToCurrent()
 	if (!initialized_)
 	{
-		// coordinator 尚未完成 initialize()，不能输出任何电流命令。
+		// Comment split from executable statement.
 		lastStatus_ = HIC_STATUS_ERROR_INIT;
 		return lastStatus_;
 	}
 	if (!motorCurrentCommand || !jointProtectionStatus)
 	{
-		// 输出数组由外部提供，空指针时直接报错，避免写非法内存。
+		// Comment split from executable statement.
 		lastStatus_ = HIC_STATUS_ERROR_NULL_POINTER;
 		return lastStatus_;
 	}
 
-	// 先清空输出，保证后续任何错误返回都不会让调用方误用旧命令。
+	// Comment split from executable statement.
+
 	clearCurrentCommand(motorCurrentCommand);
 	clearProtectionStatus(jointProtectionStatus);
 
 	double jointTorqueCommand[HIC_MAX_JOINTS] = { 0.0 };
-	// Step 1: 统一计算当前力控子模式下的关节力矩命令。
-	// 具体是零力、笛卡尔阻抗还是关节阻抗，由 forceControlMode_ 在该函数内部继续分发。
+	// Step 1: compute torque command for the active force-control sub-mode.
 	HicStatus status = computeForceControlTorqueCommand(jointTorqueCommand, jointProtectionStatus);
 	if (status != HIC_STATUS_OK && status != HIC_STATUS_ERROR_CURRENT_LIMIT)
 	{
-		// 除了“命令已被限幅”这种可继续使用的状态，其他错误都不允许继续转电流。
+		// Comment split from executable statement.
 		clearCurrentCommand(motorCurrentCommand);
 		lastStatus_ = status;
 		return lastStatus_;
 	}
-
-	// Step 2: 将关节力矩命令转换为电机电流命令。
-	// 换算依赖 torqueConstant、gearRatio、transmissionEfficiency。
+	// Step 2: convert joint torque command to motor current command.
 	const HicStatus convertStatus = convertTorqueToCurrent(jointTorqueCommand, motorCurrentCommand);
 	if (convertStatus != HIC_STATUS_OK)
 	{
-		// 电流换算失败时同样清空输出，避免外部驱动器拿到不可信命令。
+		// Comment split from executable statement.
 		clearCurrentCommand(motorCurrentCommand);
 		lastStatus_ = convertStatus;
 		return lastStatus_;
 	}
 
-	// 保留力矩计算阶段的状态码；若力矩阶段触发限幅，电流数组仍然是限幅后的可用命令。
+	// Comment split from executable statement.
+
 	lastStatus_ = status;
 	return lastStatus_;
 }
@@ -1899,7 +1944,6 @@ HicStatus HicControlCoordinator::getCurrentCartesianState(
 	double* currentPose,
 	double* currentTwist)
 {
-	// 该接口只做“状态 -> 运动学量”的转换，不参与任何控制输出逻辑。
 	if (!initialized_)
 	{
 		return HIC_STATUS_ERROR_INIT;
@@ -1991,7 +2035,6 @@ HicStatus HicControlCoordinator::getLastStatus() const
 
 HicStatus HicControlCoordinator::reset()
 {
-	// reset 的设计目标是“快速回到运行态基线”，而不是“重建整个对象”。
 	controlMode_ = HIC_CONTROL_MODE_IDLE;
 	forceControlMode_ = HIC_FORCE_CONTROL_MODE_NONE;
 	currentTime_ = 0.0;
@@ -2017,9 +2060,7 @@ HicStatus HicControlCoordinator::reset()
 
 // ============================================================
 // 9. 笛卡尔阻抗内部求解与通用安全工具
-// 说明：
 // 1. 这一组函数是控制核心的公共底座；
-// 2. ZeroForceMode 和阻抗模式都会复用其中一部分安全能力。
 // ============================================================
 
 HicStatus HicControlCoordinator::runCartesianImpedanceStep(
@@ -2027,7 +2068,6 @@ HicStatus HicControlCoordinator::runCartesianImpedanceStep(
 	bool* jointProtectionStatus)
 {
 	// 该函数是阻抗模式的一次完整控制周期：
-	// 取状态 -> 算位姿/Jacobian/twist -> 算模型项 -> 算阻抗 -> 做安全限幅。
 	clearTorqueCommand(jointTorqueCommand);
 	clearProtectionStatus(jointProtectionStatus);
 
@@ -2067,7 +2107,6 @@ HicStatus HicControlCoordinator::runCartesianImpedanceStep(
 
 	if (config_.enableGravityCompensation)
 	{
-		// 当前阻抗模式默认在关节力矩层叠加重力补偿，减轻末端维持姿态时的静态负担。
 		status = dynamicsAdapter_.computeGravityTorque(state.jointPosition, gravityTorque);
 		if (status != HIC_STATUS_OK)
 		{
@@ -2121,12 +2160,7 @@ HicStatus HicControlCoordinator::computeJointImpedanceTorqueCommand(
 	double* jointTorqueCommand,
 	bool* jointProtectionStatus)
 {
-	// 关节空间阻抗模式完整链路：
-	// 1. 从 robotStateObserver_ 读取滤波后的 q/dq；
-	// 2. 按需从 forceObserver_ 读取滤波后的外力矩 tau_ext_hat；
-	// 3. jointImpedanceCore_ 只计算关节空间 PD 阻抗力矩；
-	// 4. coordinator 叠加重力/科氏等动力学补偿；
-	// 5. 最后统一调用 applySafetyLimits()，复用现有安全保护链路。
+	// Comment split from executable statement.
 	if (!initialized_)
 	{
 		lastStatus_ = HIC_STATUS_ERROR_INIT;
@@ -2160,7 +2194,7 @@ HicStatus HicControlCoordinator::computeJointImpedanceTorqueCommand(
 
 	double q[HIC_MAX_JOINTS] = { 0.0 };
 	double dq[HIC_MAX_JOINTS] = { 0.0 };
-	// Step 1: 读取滤波后的关节位置和速度，单位分别为 rad、rad/s。
+	// Step 1: read filtered state from the state observer.
 	HicStatus status = robotStateObserver_.getFilteredJointPosition(q);
 	if (status != HIC_STATUS_OK)
 	{
@@ -2183,7 +2217,7 @@ HicStatus HicControlCoordinator::computeJointImpedanceTorqueCommand(
 	const double* tauExtPtr = nullptr;
 	if (jointImpedanceConfig_.enableExternalTorqueCompensation)
 	{
-		// Step 2: 外力矩补偿启用时，读取由电流反推链路或外部接口更新的滤波外力矩。
+		// Comment split from executable statement.
 		status = forceObserver_.getFilteredJointExternalTorque(tauExt);
 		if (status != HIC_STATUS_OK)
 		{
@@ -2194,7 +2228,7 @@ HicStatus HicControlCoordinator::computeJointImpedanceTorqueCommand(
 	}
 
 	double tauImp[HIC_MAX_JOINTS] = { 0.0 };
-	// Step 3: 核心类只做关节阻抗数学，不负责动力学补偿、模式状态或安全限幅。
+	// Comment split from executable statement.
 	status = jointImpedanceCore_.computeJointTorque(q, dq, tauExtPtr, tauImp);
 	if (status != HIC_STATUS_OK)
 	{
@@ -2204,7 +2238,7 @@ HicStatus HicControlCoordinator::computeJointImpedanceTorqueCommand(
 
 	double tauGravity[HIC_MAX_JOINTS] = { 0.0 };
 	double tauCoriolis[HIC_MAX_JOINTS] = { 0.0 };
-	// Step 4: 在 coordinator 层叠加已有动力学补偿，避免阻抗核心类承担模型职责。
+	// Comment split from executable statement.
 	status = dynamicsAdapter_.computeGravityTorque(q, tauGravity);
 	if (status != HIC_STATUS_OK)
 	{
@@ -2226,7 +2260,8 @@ HicStatus HicControlCoordinator::computeJointImpedanceTorqueCommand(
 		jointTorqueCommand[i] = tauImp[i] + tauGravity[i] + tauCoriolis[i];
 	}
 
-	// Step 5: 所有关节阻抗输出必须走统一安全链路：硬限位、力矩变化率、力矩幅值限幅。
+	// Comment split from executable statement.
+
 	status = applySafetyLimits(q, jointTorqueCommand, jointProtectionStatus);
 	if (status != HIC_STATUS_OK && status != HIC_STATUS_ERROR_CURRENT_LIMIT)
 	{
@@ -2257,7 +2292,6 @@ HicStatus HicControlCoordinator::applySafetyLimits(
 	}
 	if (hasNaNOrInf(jointTorqueCommand, config_.jointCount))
 	{
-		// 控制命令一旦出现 NaN / Inf，最保守的处理就是整组清零并返回状态错误。
 		std::fill(jointTorqueCommand, jointTorqueCommand + config_.jointCount, 0.0);
 		return HIC_STATUS_ERROR_ROBOT_STATE;
 	}
@@ -2270,7 +2304,6 @@ HicStatus HicControlCoordinator::applySafetyLimits(
 		if (jointLimitEnabled &&
 			(jointPosition[i] > config_.upperJointLimit[i] || jointPosition[i] < config_.lowerJointLimit[i]))
 		{
-			// 已越过硬限位时，直接把对应关节力矩压成 0，优先保证不继续向危险方向输出。
 			jointProtectionStatus[i] = true;
 			jointTorqueCommand[i] = 0.0;
 			status = HIC_STATUS_ERROR_JOINT_LIMIT;
@@ -2280,7 +2313,6 @@ HicStatus HicControlCoordinator::applySafetyLimits(
 		if (config_.enableTorqueRateLimit && config_.maxTorqueRate[i] > 0.0)
 		{
 			// 斜率限制针对的是“本周期相对上一周期的变化量”，
-			// 它能抑制命令突变，降低驱动器和机械结构受到的冲击。
 			const double delta = jointTorqueCommand[i] - previousJointTorqueCommand_[i];
 			const double limit = config_.maxTorqueRate[i] * config_.controlPeriod;
 			jointTorqueCommand[i] = previousJointTorqueCommand_[i] +
@@ -2294,8 +2326,6 @@ HicStatus HicControlCoordinator::applySafetyLimits(
 			config_.maxJointTorque[i]);
 		if (clampedTorque != jointTorqueCommand[i])
 		{
-			// 力矩被夹紧并不一定是致命错误，因此返回 current limit 风格的软错误，
-			// 同时让上层知道该关节进入了保护状态。
 			jointTorqueCommand[i] = clampedTorque;
 			jointProtectionStatus[i] = true;
 			status = HIC_STATUS_ERROR_CURRENT_LIMIT;
@@ -2320,8 +2350,6 @@ HicStatus HicControlCoordinator::convertTorqueToCurrent(
 
 	for (int i = 0; i < config_.jointCount; ++i)
 	{
-		// 力矩到电流的分母为 kt * N * eta。
-		// 只要任何一项非正，说明执行器参数配置存在错误，不能继续下发命令。
 		const double denom =
 			config_.torqueConstant[i] * config_.gearRatio[i] * config_.transmissionEfficiency[i];
 		if (denom <= 0.0)
@@ -2332,7 +2360,6 @@ HicStatus HicControlCoordinator::convertTorqueToCurrent(
 		double current = jointTorqueCommand[i] / denom;
 		if (config_.enableCurrentLimit)
 		{
-			// 电流限制放在换算后执行，能直接对最终驱动器量做约束。
 			current = clampToConfiguredRange(
 				current,
 				config_.lowerMotorCurrent[i],
@@ -2345,7 +2372,6 @@ HicStatus HicControlCoordinator::convertTorqueToCurrent(
 }
 
 // ============================================================
-// 10. 通用小工具
 // ============================================================
 
 void HicControlCoordinator::clearCurrentCommand(double* motorCurrentCommand) const
@@ -2398,8 +2424,6 @@ bool HicControlCoordinator::hasNaNOrInf(const double* data, int size) const
 
 void HicControlCoordinator::invalidateCommandCache()
 {
-	// 任何影响控制输出的输入变化，都通过版本号递增来表达。
-	// 这样 computeCartesianImpedanceTorqueCommand() 就能快速判断缓存是否还能复用。
 	++commandInputVersion_;
 	commandCacheValid_ = false;
 }

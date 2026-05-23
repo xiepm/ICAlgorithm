@@ -1,12 +1,7 @@
 /// @file hic_c_api.cpp
-/// @brief HIC 对外 C 接口实现文件。
 /// @note 该文件的职责是：
-/// 1. 承接 hic_c_api.h 中正式暴露的 C ABI；
 /// 2. 完成空指针、初始化状态等边界检查；
-/// 3. 将外部结构体/裸数组转发给内部 HicControlCoordinator；
-/// 4. 在失败场景下对命令结果数组做安全清零，避免上层误用旧数据。
 /// @note 当前版本采用“单 coordinator 单实例”模型，因此本文件内部通过一个全局 shared_ptr
-/// 持有唯一的控制器对象。后续如果要扩展到多机器人/多实例，需要从这里改成 handle 风格接口。
 #include "hic_controller/interface/hic_c_api.h"
 
 #include "hic_controller/coordinator/hic_control_coordinator.h"
@@ -14,14 +9,16 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <memory>
+#include <mutex>
 
 namespace
 {
-/// @brief 当前进程内唯一的 HIC 控制协调器实例。
-/// @note 由 hic_initialize_control() 创建或重建。
-std::shared_ptr<hic::HicControlCoordinator> g_hicCoordinator;
-
+// Keep one coordinator per group. group 0 and group 1 must not overwrite each other.
+std::map<RTS_IEC_INT, std::shared_ptr<hic::HicControlCoordinator>> g_hicCoordinators;
+std::mutex g_hicCoordinatorsMutex;
+thread_local std::shared_ptr<hic::HicControlCoordinator> g_hicCoordinator;
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kDegToRad = kPi / 180.0;
 constexpr double kMmToM = 0.001;
@@ -29,8 +26,6 @@ constexpr double kMmToM = 0.001;
 template <typename T>
 void clearArray(T* data, int size)
 {
-	/// @brief 将命令结果数组清零。
-	/// @note 主要用于错误返回前的兜底处理，避免调用方拿到半旧半新的计算结果。
 	if (!data)
 	{
 		return;
@@ -41,10 +36,24 @@ void clearArray(T* data, int size)
 	}
 }
 
-bool coordinatorReady()
+bool coordinatorReady(RTS_IEC_INT groupId)
 {
-	/// @brief 判断 coordinator 是否已经创建。
-	return static_cast<bool>(g_hicCoordinator);
+	std::lock_guard<std::mutex> lock(g_hicCoordinatorsMutex);
+	std::map<RTS_IEC_INT, std::shared_ptr<hic::HicControlCoordinator>>::const_iterator it =
+		g_hicCoordinators.find(groupId);
+	if (it == g_hicCoordinators.end() || !it->second)
+	{
+#ifdef HIC_ENABLE_DEBUG_PRINT
+		std::fprintf(stderr,
+			"[hic_c_api] coordinator not initialized for group=%d activeGroupCount=%u\n",
+			groupId,
+			static_cast<unsigned>(g_hicCoordinators.size()));
+#endif
+		g_hicCoordinator.reset();
+		return false;
+	}
+	g_hicCoordinator = it->second;
+	return true;
 }
 
 double timeConstantToAlpha(double controlPeriod, double timeConstant)
@@ -92,6 +101,11 @@ int clampDebugJointCount(int jointCount)
 	return jointCount;
 }
 
+bool shouldDebugPrint(int& counter)
+{
+	return ((counter++ % 1000) == 0);
+}
+
 void fixedZyxEulerDegToQuaternion(
 	double rzDeg,
 	double ryDeg,
@@ -109,8 +123,6 @@ void fixedZyxEulerDegToQuaternion(
 	const double cx = std::cos(halfRx);
 	const double sx = std::sin(halfRx);
 
-	// 外部姿态约定为绕固定基坐标系依次执行 Z、Y、X 旋转，
-	// 这里按 q = qz * qy * qx 组合得到内部使用的单位四元数。
 	quaternion[0] = cz * cy * cx + sz * sy * sx;
 	quaternion[1] = cz * cy * sx - sz * sy * cx;
 	quaternion[2] = cz * sy * cx + sz * cy * sx;
@@ -128,11 +140,9 @@ void convertPoseZyxEulerMmDegToQuaternionPose(
 		poseZyxEuler[3], poseZyxEuler[4], poseZyxEuler[5], &quaternionPose[3]);
 }
 
-int requireCoordinator()
+int requireCoordinator(RTS_IEC_INT groupId)
 {
-	/// @brief 返回统一的“是否已初始化”状态码。
-	/// @note 便于低频 set 接口复用，减少重复样板代码。
-	return coordinatorReady() ? HIC_STATUS_OK : HIC_STATUS_ERROR_INIT;
+	return coordinatorReady(groupId) ? HIC_STATUS_OK : HIC_STATUS_ERROR_INIT;
 }
 
 }
@@ -147,12 +157,27 @@ const char* hic_get_version()
 
 int hic_initialize_control(RTS_IEC_INT groupId, const HicInitializeConfig* config)
 {
-	/// @brief 创建新的 coordinator，并按外部配置完成整体初始化。
-	/// @note 当前重复调用会直接覆盖旧实例，因此会丢弃之前缓存的内部状态。
+	// Create or replace the coordinator that belongs to this groupId only.
 	if (!config)
 	{
+#ifdef HIC_ENABLE_DEBUG_PRINT
+		std::fprintf(stderr,
+			"[hic_initialize_control] group=%d config=null status=%d\n",
+			groupId,
+			static_cast<int>(HIC_STATUS_ERROR_NULL_POINTER));
+#endif
 		return HIC_STATUS_ERROR_NULL_POINTER;
 	}
+
+#ifdef HIC_ENABLE_DEBUG_PRINT
+	std::fprintf(stderr,
+		"[hic_initialize_control] external input: group=%d jointCount=%d controlPeriod=%.9f robotType=%d\n",
+		groupId,
+		config->jointCount,
+		config->controlPeriod,
+		config->robotType);
+#endif
+
 	HicControlConfig internalConfig = {};
 	internalConfig.jointCount = config->jointCount;
 	internalConfig.controlPeriod = config->controlPeriod;
@@ -164,21 +189,63 @@ int hic_initialize_control(RTS_IEC_INT groupId, const HicInitializeConfig* confi
 	for (int i = 0; i < HIC_MAX_JOINTS; ++i)
 	{
 		internalConfig.kinematicParams[i] = config->kinematicDHParams[i];
-		// 运行参数在初始化之后再由各个 set 接口下发。
-		// 这里给执行器换算参数一个保守有效默认值，避免内部状态观测器因 NaN/Inf 直接失效。
+		// Runtime conversion parameters can be overwritten later by the set API.
 		internalConfig.torqueConstant[i] = 1.0;
 		internalConfig.gearRatio[i] = 1.0;
 		internalConfig.transmissionEfficiency[i] = 1.0;
+#ifdef HIC_ALLOW_DEBUG_PARAM_VALIDATION_BYPASS
+		// Debug bring-up defaults: keep missing external limit configuration from clamping everything to zero.
+		internalConfig.lowerJointLimit[i] = -1.0e6;
+		internalConfig.upperJointLimit[i] = 1.0e6;
+		internalConfig.lowerJointVelocity[i] = -1.0e6;
+		internalConfig.upperJointVelocity[i] = 1.0e6;
+		internalConfig.lowerJointAcceleration[i] = -1.0e6;
+		internalConfig.upperJointAcceleration[i] = 1.0e6;
+		internalConfig.lowerJointTorque[i] = -1.0e6;
+		internalConfig.upperJointTorque[i] = 1.0e6;
+		internalConfig.maxJointTorque[i] = 1.0e6;
+		internalConfig.lowerMotorCurrent[i] = -1000.0;
+		internalConfig.upperMotorCurrent[i] = 1000.0;
+		internalConfig.maxJointCurrent[i] = 1000.0;
+#endif
 	}
-	g_hicCoordinator.reset(new hic::HicControlCoordinator());
-	return g_hicCoordinator->initialize(internalConfig);
+
+	std::shared_ptr<hic::HicControlCoordinator> coordinator(new hic::HicControlCoordinator());
+	const int status = coordinator->initialize(internalConfig);
+#ifdef HIC_ENABLE_DEBUG_PRINT
+	std::fprintf(stderr,
+		"[hic_initialize_control] group=%d jointCount=%d controlPeriod=%.9f robotType=%d status=%d\n",
+		groupId,
+		config->jointCount,
+		config->controlPeriod,
+		config->robotType,
+		status);
+#endif
+	if (status != HIC_STATUS_OK)
+	{
+		std::lock_guard<std::mutex> lock(g_hicCoordinatorsMutex);
+		g_hicCoordinators.erase(groupId);
+		g_hicCoordinator.reset();
+		return status;
+	}
+
+	{
+		std::lock_guard<std::mutex> lock(g_hicCoordinatorsMutex);
+		g_hicCoordinators[groupId] = coordinator;
+#ifdef HIC_ENABLE_DEBUG_PRINT
+		std::fprintf(stderr,
+			"[hic_initialize_control] stored coordinator group=%d activeGroupCount=%u\n",
+			groupId,
+			static_cast<unsigned>(g_hicCoordinators.size()));
+#endif
+	}
+	g_hicCoordinator = coordinator;
+	return status;
 }
 
 int hic_set_dynamics_linear_parameters(RTS_IEC_INT groupId, const double dynamic_params[HIC_MAX_DYNAMIC_PARAMS])
 {
-	/// @brief 设置线性化动力学参数。
-	/// @note 参数最终会进入 dynamics adapter，由不同 robotType 的后端各自解释。
-	const int readyStatus = requireCoordinator();
+	const int readyStatus = requireCoordinator(groupId);
 	if (readyStatus != HIC_STATUS_OK)
 	{
 		return readyStatus;
@@ -191,9 +258,7 @@ int hic_set_payload_mass_properties(
 	double mass,
 	const double center_of_mass[3])
 {
-	/// @brief 设置末端负载质量与质心。
-	/// @note 当前接口链路已经保留，但具体 backend 是否真正实现取决于对应机型动力学模型。
-	const int readyStatus = requireCoordinator();
+	const int readyStatus = requireCoordinator(groupId);
 	if (readyStatus != HIC_STATUS_OK)
 	{
 		return readyStatus;
@@ -216,9 +281,7 @@ int hic_set_motor_torque_conversion_parameters(
 	const double gear_ratio[HIC_MAX_JOINTS],
 	const double transmission_efficiency[HIC_MAX_JOINTS])
 {
-	/// @brief 设置电机电流到关节力矩的换算参数。
-	/// @note 这些参数既会影响补偿估计，也会影响力矩到电流的输出换算。
-	const int readyStatus = requireCoordinator();
+	const int readyStatus = requireCoordinator(groupId);
 	if (readyStatus != HIC_STATUS_OK)
 	{
 		return readyStatus;
@@ -242,6 +305,7 @@ int hic_set_motor_torque_conversion_parameters(
 			"[hic_set_motor_torque_conversion_parameters] group=%d jointCount=%d\n",
 			groupId,
 			debug_joint_count);
+		std::fflush(stderr);
 		for (int i = 0; i < debug_joint_count; ++i)
 		{
 			std::fprintf(stderr,
@@ -260,8 +324,7 @@ int hic_set_motor_torque_conversion_parameters(
 
 int hic_set_joint_position_limits(RTS_IEC_INT groupId, const HicJointRangeLimits* limits)
 {
-	/// @brief 设置关节位置安全边界。
-	const int readyStatus = requireCoordinator();
+	const int readyStatus = requireCoordinator(groupId);
 	if (readyStatus != HIC_STATUS_OK)
 	{
 		return readyStatus;
@@ -282,8 +345,7 @@ int hic_set_joint_position_limits(RTS_IEC_INT groupId, const HicJointRangeLimits
 
 int hic_set_joint_velocity_limits(RTS_IEC_INT groupId, const HicJointMaxLimits* limits)
 {
-	/// @brief 设置关节速度最大绝对值。
-	const int readyStatus = requireCoordinator();
+	const int readyStatus = requireCoordinator(groupId);
 	if (readyStatus != HIC_STATUS_OK)
 	{
 		return readyStatus;
@@ -305,8 +367,7 @@ int hic_set_joint_velocity_limits(RTS_IEC_INT groupId, const HicJointMaxLimits* 
 
 int hic_set_joint_acceleration_limits(RTS_IEC_INT groupId, const HicJointMaxLimits* limits)
 {
-	/// @brief 设置关节加速度最大绝对值。
-	const int readyStatus = requireCoordinator();
+	const int readyStatus = requireCoordinator(groupId);
 	if (readyStatus != HIC_STATUS_OK)
 	{
 		return readyStatus;
@@ -328,8 +389,7 @@ int hic_set_joint_acceleration_limits(RTS_IEC_INT groupId, const HicJointMaxLimi
 
 int hic_set_joint_torque_limits(RTS_IEC_INT groupId, const HicJointRangeLimits* limits)
 {
-	/// @brief 设置关节力矩安全边界。
-	const int readyStatus = requireCoordinator();
+	const int readyStatus = requireCoordinator(groupId);
 	if (readyStatus != HIC_STATUS_OK)
 	{
 		return readyStatus;
@@ -343,22 +403,51 @@ int hic_set_joint_torque_limits(RTS_IEC_INT groupId, const HicJointRangeLimits* 
 
 int hic_set_motor_current_limits(RTS_IEC_INT groupId, const HicJointRangeLimits* limits)
 {
-	/// @brief 设置电机电流安全边界。
-	const int readyStatus = requireCoordinator();
+	const int readyStatus = requireCoordinator(groupId);
 	if (readyStatus != HIC_STATUS_OK)
 	{
 		return readyStatus;
 	}
 	if (!limits)
 	{
+#ifdef HIC_ENABLE_DEBUG_PRINT
+		std::fprintf(stderr,
+			"[hic_set_motor_current_limits] group=%d limits=null status=%d\n",
+			groupId,
+			static_cast<int>(HIC_STATUS_ERROR_NULL_POINTER));
+#endif
 		return HIC_STATUS_ERROR_NULL_POINTER;
 	}
-	return g_hicCoordinator->setMotorCurrentLimits(limits->lower, limits->upper);
+#ifdef HIC_ENABLE_DEBUG_PRINT
+	{
+		const int debug_joint_count = clampDebugJointCount(g_hicCoordinator->getJointCount());
+		std::fprintf(stderr,
+			"[hic_set_motor_current_limits] group=%d jointCount=%d input limits:\n",
+			groupId,
+			debug_joint_count);
+		std::fflush(stderr);
+		for (int i = 0; i < debug_joint_count; ++i)
+		{
+			std::fprintf(stderr,
+				"  current_limit[%d] lower=%.6f upper=%.6f\n",
+				i,
+				limits->lower[i],
+				limits->upper[i]);
+		}
+	}
+#endif
+	const int status = g_hicCoordinator->setMotorCurrentLimits(limits->lower, limits->upper);
+#ifdef HIC_ENABLE_DEBUG_PRINT
+	std::fprintf(stderr,
+		"[hic_set_motor_current_limits] group=%d status=%d\n",
+		groupId,
+		status);
+#endif
+	return status;
 }
-
 int hic_set_robot_mounting_angles(RTS_IEC_INT groupId, double rotation, double tilt)
 {
-	const int readyStatus = requireCoordinator();
+	const int readyStatus = requireCoordinator(groupId);
 	if (readyStatus != HIC_STATUS_OK)
 	{
 		return readyStatus;
@@ -376,19 +465,13 @@ int hic_set_robot_mounting_angles(RTS_IEC_INT groupId, double rotation, double t
 
 int hic_update_state_estimates(RTS_IEC_INT groupId, const HicStateEstimateInput* input)
 {
-	/// @brief 调试期高频主输入接口。
-	/// @note 当前版本主链路仍以 jointPosition 和 motorCurrent 为主；
-	/// commandJointPosition 已作为外部接口字段保留，便于后续扩展跟踪误差相关逻辑。
-	/// currentTime 主要用于时间对齐和内部差分估计。
-	/// @note jointVelocity / jointAcceleration 不再由外部显式输入，
-	/// 而是交给 robotStateObserver 基于“位置差分 + 时间戳”在内部估计。
-	/// @note 关节阻抗完整链路从这里开始：
-	/// 1. C API 边界将 jointPosition 从 deg 转为内部 rad；
+	/// @brief 调试期高频状态输入接口。
+	/// @note 当前主链路以 jointPosition 和 motorCurrent 为输入：
+	/// 1. C API 将 jointPosition 从 deg 转为内部 rad；
 	/// 2. coordinator 将 q/current/time 送入 robotStateObserver_；
-	/// 3. robotStateObserver_ 滤波并估计 dq/ddq/motorEstimatedTorque；
-	/// 4. coordinator 用 motorEstimatedTorque - dynamicsModelTorque 刷新 forceObserver_ 中的外力矩；
-	/// 5. 后续取力矩/电流命令时，再读取 observer 输出参与关节阻抗计算。
-	if (!coordinatorReady())
+	/// 3. robotStateObserver_ 估计 dq/ddq/motorEstimatedTorque；
+	/// 4. coordinator 刷新 forceObserver_ 中的外力矩估计。
+	if (!coordinatorReady(groupId))
 	{
 		return HIC_STATUS_ERROR_INIT;
 	}
@@ -405,15 +488,19 @@ int hic_update_state_estimates(RTS_IEC_INT groupId, const HicStateEstimateInput*
 
 #ifdef HIC_ENABLE_DEBUG_PRINT
 	static int debug_count = 0;
-	if ((debug_count++ % 1000) == 0)
+	const bool should_debug_print = shouldDebugPrint(debug_count);
+	if (should_debug_print)
 	{
-		const int debug_joint_count = clampDebugJointCount(g_hicCoordinator->getJointCount());
+		const int configured_joint_count = g_hicCoordinator->getJointCount();
+		const int debug_joint_count = clampDebugJointCount(configured_joint_count);
 		std::fprintf(stderr,
-			"[hic_update_state_estimates] group=%d t=%.6f inputJointCount=%d configuredJointCount=%d\n",
+			"[hic_update_state_estimates] group=%d t=%.6f inputJointCount=%d configuredJointCount=%d debugPrintCount=%d\n",
 			groupId,
 			input->currentTime,
 			input->jointCount,
+			configured_joint_count,
 			debug_joint_count);
+		std::fflush(stderr);
 		for (int i = 0; i < debug_joint_count; ++i)
 		{
 			std::fprintf(stderr,
@@ -423,19 +510,46 @@ int hic_update_state_estimates(RTS_IEC_INT groupId, const HicStateEstimateInput*
 				joint_position_rad[i],
 				input->motorCurrent[i]);
 		}
+		std::fflush(stderr);
 	}
 #endif
 
-	return g_hicCoordinator->updateRobotState(
+	const int status = g_hicCoordinator->updateRobotState(
 		joint_position_rad, input->motorCurrent, input->currentTime);
+
+#ifdef HIC_ENABLE_DEBUG_PRINT
+	if (should_debug_print)
+	{
+		std::fprintf(stderr,
+			"[hic_update_state_estimates] updateRobotState returned status=%d\n",
+			status);
+		std::fflush(stderr);
+		HicRobotState observedState = {};
+		const int stateStatus = g_hicCoordinator->getRobotState(observedState);
+		std::fprintf(stderr,
+			"[hic_update_state_estimates] getRobotState status=%d motorEstimatedTorque:\n",
+			stateStatus);
+		const int debug_joint_count = clampDebugJointCount(g_hicCoordinator->getJointCount());
+		for (int i = 0; i < debug_joint_count; ++i)
+		{
+			std::fprintf(stderr,
+				"  tau_est[%d]=%.6f Nm filteredCurrent=%.6f A\n",
+				i,
+				observedState.motorEstimatedTorque[i],
+				observedState.motorCurrent[i]);
+		}
+		std::fflush(stderr);
+	}
+#endif
+
+	return status;
 }
 
 int hic_set_cartesian_impedance_gains(
 	RTS_IEC_INT groupId,
 	const HicImpedanceGains* gains)
 {
-	/// @brief 设置 6 维笛卡尔阻抗增益。
-	if (!coordinatorReady())
+	if (!coordinatorReady(groupId))
 	{
 		return HIC_STATUS_ERROR_INIT;
 	}
@@ -448,7 +562,7 @@ int hic_set_cartesian_impedance_gains(
 
 int hic_set_force_control_nullspace_config(RTS_IEC_INT groupId, const HicNullspaceControlConfig* config)
 {
-	if (!coordinatorReady())
+	if (!coordinatorReady(groupId))
 	{
 		return HIC_STATUS_ERROR_INIT;
 	}
@@ -461,7 +575,7 @@ int hic_set_force_control_nullspace_config(RTS_IEC_INT groupId, const HicNullspa
 
 int hic_capture_current_joint_position_as_nullspace_target(RTS_IEC_INT groupId)
 {
-	if (!coordinatorReady())
+	if (!coordinatorReady(groupId))
 	{
 		return HIC_STATUS_ERROR_INIT;
 	}
@@ -472,10 +586,7 @@ int hic_set_joint_impedance_config(
 	RTS_IEC_INT groupId,
 	const HicJointImpedanceConfig* config)
 {
-	/// @brief 设置关节阻抗参数。
-	/// @note 这是 C API 边界函数，外部 targetPosition 使用 deg；进入 coordinator 前统一转换为内部 rad。
-	/// @note stiffness/damping/targetVelocity/targetAcceleration 已按 SI 单位传入，不做换算。
-	if (!coordinatorReady())
+	if (!coordinatorReady(groupId))
 	{
 		return HIC_STATUS_ERROR_INIT;
 	}
@@ -494,7 +605,7 @@ int hic_set_joint_impedance_config(
 
 int hic_capture_current_joint_position_as_impedance_target(RTS_IEC_INT groupId)
 {
-	if (!coordinatorReady())
+	if (!coordinatorReady(groupId))
 	{
 		return HIC_STATUS_ERROR_INIT;
 	}
@@ -503,7 +614,7 @@ int hic_capture_current_joint_position_as_impedance_target(RTS_IEC_INT groupId)
 
 int hic_set_cartesian_fixed_position_target(RTS_IEC_INT groupId, const double target_position[3])
 {
-	if (!coordinatorReady())
+	if (!coordinatorReady(groupId))
 	{
 		return HIC_STATUS_ERROR_INIT;
 	}
@@ -521,7 +632,7 @@ int hic_set_cartesian_fixed_position_target(RTS_IEC_INT groupId, const double ta
 
 int hic_capture_current_position_as_fixed_target(RTS_IEC_INT groupId)
 {
-	if (!coordinatorReady())
+	if (!coordinatorReady(groupId))
 	{
 		return HIC_STATUS_ERROR_INIT;
 	}
@@ -530,10 +641,7 @@ int hic_capture_current_position_as_fixed_target(RTS_IEC_INT groupId)
 
 int hic_capture_current_pose_as_fixed_target(RTS_IEC_INT groupId)
 {
-	/// @brief 将当前末端位姿抓取为固定点阻抗目标。
-	/// @note 典型用法是在“机器人已经到达一个自然姿态”后调用，
-	/// 让后续阻抗控制围绕这个姿态工作。
-	if (!coordinatorReady())
+	if (!coordinatorReady(groupId))
 	{
 		return HIC_STATUS_ERROR_INIT;
 	}
@@ -542,9 +650,7 @@ int hic_capture_current_pose_as_fixed_target(RTS_IEC_INT groupId)
 
 int hic_set_joint_torque_sensor_parameters(RTS_IEC_INT groupId, const HicTorqueSensorConfig* config)
 {
-	/// @brief 配置关节扭矩传感器的通道映射、零漂、比例系数和故障阈值。
-	/// @note 该接口对应 forceObserver 的“传感器数据处理层”，不参与内部动力学建模。
-	if (!coordinatorReady())
+	if (!coordinatorReady(groupId))
 	{
 		return HIC_STATUS_ERROR_INIT;
 	}
@@ -557,10 +663,8 @@ int hic_set_joint_torque_sensor_parameters(RTS_IEC_INT groupId, const HicTorqueS
 
 int hic_update_raw_joint_torque_sensor(RTS_IEC_INT groupId, const double* raw_torque_by_hardware_channel)
 {
-	/// @brief 输入外部回传的原始关节扭矩传感器值。
 	/// @note 进入 forceObserver 后会完成标定、滤波和故障检查，
-	/// 但不会直接参与当前阻抗主循环的动力学补偿计算。
-	if (!coordinatorReady())
+	if (!coordinatorReady(groupId))
 	{
 		return HIC_STATUS_ERROR_INIT;
 	}
@@ -582,6 +686,7 @@ int hic_update_raw_joint_torque_sensor(RTS_IEC_INT groupId, const double* raw_to
 				"[hic_update_raw_joint_torque_sensor] group=%d jointCount=%d\n",
 				groupId,
 				debug_joint_count);
+		std::fflush(stderr);
 			for (int i = 0; i < debug_joint_count; ++i)
 			{
 				std::fprintf(stderr,
@@ -598,7 +703,7 @@ int hic_update_raw_joint_torque_sensor(RTS_IEC_INT groupId, const double* raw_to
 
 int hic_update_wrench_sensor_data(RTS_IEC_INT groupId, const HicWrenchSensorInput* input)
 {
-	if (!coordinatorReady())
+	if (!coordinatorReady(groupId))
 	{
 		return HIC_STATUS_ERROR_INIT;
 	}
@@ -611,7 +716,7 @@ int hic_update_wrench_sensor_data(RTS_IEC_INT groupId, const HicWrenchSensorInpu
 
 int hic_update_dual_encoder_joint_position(RTS_IEC_INT groupId, const HicDualEncoderInput* input)
 {
-	if (!coordinatorReady())
+	if (!coordinatorReady(groupId))
 	{
 		return HIC_STATUS_ERROR_INIT;
 	}
@@ -624,7 +729,7 @@ int hic_update_dual_encoder_joint_position(RTS_IEC_INT groupId, const HicDualEnc
 
 int hic_set_gravity_vector_in_base(RTS_IEC_INT groupId, double gx, double gy, double gz)
 {
-	const int readyStatus = requireCoordinator();
+	const int readyStatus = requireCoordinator(groupId);
 	if (readyStatus != HIC_STATUS_OK)
 	{
 		return readyStatus;
@@ -634,7 +739,7 @@ int hic_set_gravity_vector_in_base(RTS_IEC_INT groupId, double gx, double gy, do
 
 int hic_set_state_filter_config(RTS_IEC_INT groupId, const HicStateFilterConfig* config)
 {
-	const int readyStatus = requireCoordinator();
+	const int readyStatus = requireCoordinator(groupId);
 	if (readyStatus != HIC_STATUS_OK)
 	{
 		return readyStatus;
@@ -675,7 +780,7 @@ int hic_set_state_filter_config(RTS_IEC_INT groupId, const HicStateFilterConfig*
 
 int hic_set_zero_force_safety_config(RTS_IEC_INT groupId, const HicZeroForceSafetyConfig* config)
 {
-	const int readyStatus = requireCoordinator();
+	const int readyStatus = requireCoordinator(groupId);
 	if (readyStatus != HIC_STATUS_OK)
 	{
 		return readyStatus;
@@ -689,7 +794,7 @@ int hic_set_zero_force_safety_config(RTS_IEC_INT groupId, const HicZeroForceSafe
 
 int hic_set_collision_detection_config(RTS_IEC_INT groupId, const HicCollisionDetectionConfig* config)
 {
-	const int readyStatus = requireCoordinator();
+	const int readyStatus = requireCoordinator(groupId);
 	if (readyStatus != HIC_STATUS_OK)
 	{
 		return readyStatus;
@@ -703,7 +808,7 @@ int hic_set_collision_detection_config(RTS_IEC_INT groupId, const HicCollisionDe
 
 int hic_set_friction_compensation_config(RTS_IEC_INT groupId, const HicFrictionCompensationConfig* config)
 {
-	const int readyStatus = requireCoordinator();
+	const int readyStatus = requireCoordinator(groupId);
 	if (readyStatus != HIC_STATUS_OK)
 	{
 		return readyStatus;
@@ -717,7 +822,7 @@ int hic_set_friction_compensation_config(RTS_IEC_INT groupId, const HicFrictionC
 
 int hic_set_dual_encoder_assist_config(RTS_IEC_INT groupId, const HicDualEncoderAssistConfig* config)
 {
-	const int readyStatus = requireCoordinator();
+	const int readyStatus = requireCoordinator(groupId);
 	if (readyStatus != HIC_STATUS_OK)
 	{
 		return readyStatus;
@@ -733,8 +838,7 @@ int hic_get_active_control_state(
 	RTS_IEC_INT groupId,
 	HicActiveControlState* state_out)
 {
-	/// @brief 获取当前活动控制状态的统一快照。
-	if (!coordinatorReady())
+	if (!coordinatorReady(groupId))
 	{
 		if (state_out)
 		{
@@ -766,11 +870,8 @@ int hic_get_current_cartesian_state(
 	RTS_IEC_INT groupId,
 	HicCartesianState* state_out)
 {
-	/// @brief 获取当前末端位姿和 twist。
-	/// @note 实际数据来自：
 	/// 1. robotStateObserver 内部保存的关节状态；
-	/// 2. kinematics adapter 的正运动学和末端速度计算。
-	if (!coordinatorReady())
+	if (!coordinatorReady(groupId))
 	{
 		if (state_out)
 		{
@@ -789,8 +890,7 @@ int hic_get_current_cartesian_state(
 
 int hic_get_last_status(RTS_IEC_INT groupId)
 {
-	/// @brief 返回 coordinator 最近一次执行的状态码。
-	if (!coordinatorReady())
+	if (!coordinatorReady(groupId))
 	{
 		return HIC_STATUS_ERROR_INIT;
 	}
@@ -799,8 +899,7 @@ int hic_get_last_status(RTS_IEC_INT groupId)
 
 int hic_get_force_control_mode(RTS_IEC_INT groupId)
 {
-	/// @brief 返回当前力控子模式。
-	if (!coordinatorReady())
+	if (!coordinatorReady(groupId))
 	{
 		return HIC_FORCE_CONTROL_MODE_NONE;
 	}
@@ -809,10 +908,7 @@ int hic_get_force_control_mode(RTS_IEC_INT groupId)
 
 int hic_reset_control(RTS_IEC_INT groupId)
 {
-	/// @brief 复位内部控制状态与缓存。
-	/// @note 这里不会删除 coordinator，也不会重新加载基础配置；
-	/// 作用更接近“清空本轮运行状态”。
-	if (!coordinatorReady())
+	if (!coordinatorReady(groupId))
 	{
 		return HIC_STATUS_ERROR_INIT;
 	}
@@ -823,7 +919,7 @@ int hic_set_cartesian_fixed_pose_target_zyx_euler(
 	RTS_IEC_INT groupId,
 	const double target_pose_zyx_euler[HIC_CARTESIAN_DIM])
 {
-	if (!coordinatorReady())
+	if (!coordinatorReady(groupId))
 	{
 		return HIC_STATUS_ERROR_INIT;
 	}
@@ -841,7 +937,7 @@ int hic_set_cartesian_trajectory_target_zyx_euler(
 	const double target_pose_zyx_euler[HIC_CARTESIAN_DIM],
 	const double target_velocity[HIC_CARTESIAN_DIM])
 {
-	if (!coordinatorReady())
+	if (!coordinatorReady(groupId))
 	{
 		return HIC_STATUS_ERROR_INIT;
 	}
@@ -864,9 +960,7 @@ int hic_set_cartesian_trajectory_target_zyx_euler(
 
 int hic_start_force_control_mode(RTS_IEC_INT groupId, int force_control_mode)
 {
-	/// @brief 统一启动力控子模式。
-	/// @note 关节阻抗模式通过 HIC_FORCE_CONTROL_MODE_JOINT_IMPEDANCE 进入，不再提供单独的 start API。
-	if (!coordinatorReady())
+	if (!coordinatorReady(groupId))
 	{
 		return HIC_STATUS_ERROR_INIT;
 	}
@@ -891,8 +985,7 @@ int hic_start_force_control_mode(RTS_IEC_INT groupId, int force_control_mode)
 
 int hic_prepare_stop_force_control_mode(RTS_IEC_INT groupId)
 {
-	/// @brief 统一的力控模式退出入口。
-	if (!coordinatorReady())
+	if (!coordinatorReady(groupId))
 	{
 		return HIC_STATUS_ERROR_INIT;
 	}
@@ -905,14 +998,11 @@ int hic_get_force_control_current_commands(
 	double motor_current_commands[HIC_MAX_JOINTS],
 	bool joint_protection_status[HIC_MAX_JOINTS])
 {
-	/// @brief 力控大类统一电流环目标命令计算结果入口。
-	/// @note 关节阻抗不在电流层另开分支；内部先复用 computeForceControlTorqueCommand() 得到力矩，
-	/// 再通过 convertTorqueToCurrent() 转换为电流。
 	if (!motor_current_commands || !joint_protection_status)
 	{
 		return HIC_STATUS_ERROR_NULL_POINTER;
 	}
-	if (!coordinatorReady())
+	if (!coordinatorReady(groupId))
 	{
 		clearArray(motor_current_commands, HIC_MAX_JOINTS);
 		clearArray(joint_protection_status, HIC_MAX_JOINTS);
@@ -928,14 +1018,12 @@ int hic_get_force_control_torque_commands(
 	double joint_torque_commands[HIC_MAX_JOINTS],
 	bool joint_protection_status[HIC_MAX_JOINTS])
 {
-	/// @brief 力控大类统一力矩环目标命令计算结果入口。
 	/// @note 当前处于 HIC_FORCE_CONTROL_MODE_JOINT_IMPEDANCE 时，会分发到
-	/// HicControlCoordinator::computeJointImpedanceTorqueCommand()。
 	if (!joint_torque_commands || !joint_protection_status)
 	{
 		return HIC_STATUS_ERROR_NULL_POINTER;
 	}
-	if (!coordinatorReady())
+	if (!coordinatorReady(groupId))
 	{
 		clearArray(joint_torque_commands, HIC_MAX_JOINTS);
 		clearArray(joint_protection_status, HIC_MAX_JOINTS);
@@ -950,8 +1038,7 @@ int hic_get_robot_state(
 	RTS_IEC_INT groupId,
 	HicRobotState* state_out)
 {
-	/// @brief 获取当前关节状态观测结果。
-	if (!coordinatorReady())
+	if (!coordinatorReady(groupId))
 	{
 		if (state_out)
 		{
@@ -979,7 +1066,7 @@ int hic_get_motion_constraint_status(RTS_IEC_INT groupId, HicMotionConstraintSta
 		return HIC_STATUS_ERROR_NULL_POINTER;
 	}
 	std::memset(status_out, 0, sizeof(*status_out));
-	if (!coordinatorReady())
+	if (!coordinatorReady(groupId))
 	{
 		return HIC_STATUS_ERROR_INIT;
 	}
@@ -992,10 +1079,7 @@ int hic_get_estimated_dynamics_torques(
 	RTS_IEC_INT groupId,
 	HicEstimatedDynamicsTorques* torques_out)
 {
-	/// @brief 获取内部动力学估计项。
-	/// @note 当前接口语义已经固定，但实现仍未完全接线。
-	/// 现阶段统一清零后返回 NOT_IMPLEMENTED，避免上层误以为结果有效。
-	if (!coordinatorReady())
+	if (!coordinatorReady(groupId))
 	{
 		if (torques_out)
 		{
@@ -1028,7 +1112,7 @@ int hic_compute_inverse_dynamics_torque(
 	const HicDynamicsComputeInput* input,
 	HicDynamicsComputeOutput* output)
 {
-	if (!coordinatorReady())
+	if (!coordinatorReady(groupId))
 	{
 		return HIC_STATUS_ERROR_INIT;
 	}
@@ -1046,7 +1130,7 @@ int hic_compute_gravity_torque(
 	const double joint_position[HIC_MAX_JOINTS],
 	double gravity_torque[HIC_MAX_JOINTS])
 {
-	if (!coordinatorReady())
+	if (!coordinatorReady(groupId))
 	{
 		clearArray(gravity_torque, HIC_MAX_JOINTS);
 		return HIC_STATUS_ERROR_INIT;
@@ -1065,7 +1149,7 @@ int hic_compute_gravity_coriolis_torque(
 	const double joint_velocity[HIC_MAX_JOINTS],
 	double torque[HIC_MAX_JOINTS])
 {
-	if (!coordinatorReady())
+	if (!coordinatorReady(groupId))
 	{
 		clearArray(torque, HIC_MAX_JOINTS);
 		return HIC_STATUS_ERROR_INIT;
@@ -1080,7 +1164,7 @@ int hic_compute_gravity_coriolis_torque(
 
 int hic_enable_wrench_sensor_for_collision_detection(RTS_IEC_INT groupId, bool enable)
 {
-	if (!coordinatorReady())
+	if (!coordinatorReady(groupId))
 	{
 		return HIC_STATUS_ERROR_INIT;
 	}
@@ -1090,7 +1174,7 @@ int hic_enable_wrench_sensor_for_collision_detection(RTS_IEC_INT groupId, bool e
 
 int hic_enable_wrench_sensor_for_force_feedforward(RTS_IEC_INT groupId, bool enable)
 {
-	if (!coordinatorReady())
+	if (!coordinatorReady(groupId))
 	{
 		return HIC_STATUS_ERROR_INIT;
 	}

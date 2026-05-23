@@ -9,6 +9,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -fvisibility=hidden -fvisibility-inlines-hidden")
 
 option(HIC_ENABLE_DEBUG_PRINT "Enable throttled debug prints in HIC C API hot paths" ON)
+option(HIC_ALLOW_DEBUG_JOINT_COUNT_MISMATCH "Allow robotType/jointCount mismatch for temporary debug bring-up" ON)
+option(HIC_ALLOW_DEBUG_PARAM_VALIDATION_BYPASS "Allow temporary parameter validation bypasses for bring-up debugging" ON)
 
 set(HIC_EIGEN_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/external/eigen3)
 set(HIC_COMMON_DIR ${CMAKE_CURRENT_SOURCE_DIR}/hic_controller/src/common)
@@ -42,6 +44,14 @@ target_compile_definitions(hic_controller PRIVATE HIC_BUILD_SHARED)
 
 if(HIC_ENABLE_DEBUG_PRINT)
     target_compile_definitions(hic_controller PRIVATE HIC_ENABLE_DEBUG_PRINT)
+endif()
+
+if(HIC_ALLOW_DEBUG_JOINT_COUNT_MISMATCH)
+    target_compile_definitions(hic_controller PRIVATE HIC_ALLOW_DEBUG_JOINT_COUNT_MISMATCH)
+endif()
+
+if(HIC_ALLOW_DEBUG_PARAM_VALIDATION_BYPASS)
+    target_compile_definitions(hic_controller PRIVATE HIC_ALLOW_DEBUG_PARAM_VALIDATION_BYPASS)
 endif()
 
 target_include_directories(hic_controller PUBLIC

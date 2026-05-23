@@ -18,7 +18,6 @@
 #define			        DIMOFTASKSPACE6	                    6  // 6维任务空间
 #define			        DIMOFTASKSPACE3                     3  // 3维任务空间
 
-
 typedef bool                    EcBoolean;
 typedef double					EcReal;
 
@@ -131,7 +130,6 @@ typedef enum EN_TrayMode
 	enTrayMode_List
 }EN_TrayMode;
 
-
 typedef struct EN_RobotDH{
 	EcReal theta[10];
 	EcReal d[10];
@@ -139,7 +137,7 @@ typedef struct EN_RobotDH{
 	EcReal alpha[10];
 }RobotDH;
 
-// tolerance �����Ƿ�λ���˶�״̬�жϣ�Ŀ��λ���뵱ǰλ�ò�ͬ����Ϊ�����˶��У���ͬ����Ϊ���˶���ɣ�
+// 运动状态：用于判断目标运动是否已经开始、正在进行、成功或失败。
 typedef enum EN_motionState
 {
 	enMotionState_NotStarted = 0,
@@ -157,7 +155,7 @@ typedef enum EN_MoveException
 	enMoveException_GENERAL_STOPPING_CRITERION
 }ENMoveException;
 
-// Profile �����ͣ�scurve trape
+// 轨迹速度规划类型：S 曲线或梯形规划。
 typedef enum EN_profileType
 {
 	enProfileType_Scurve = 0,

@@ -31,6 +31,11 @@ bool outOfRange(double value, double lower, double upper, double maxAbs)
 	}
 	return false;
 }
+
+bool shouldDebugPrint(int& counter)
+{
+	return ((counter++ % 1000) == 0);
+}
 }
 
 HicRobotStateObserver::HicRobotStateObserver()
@@ -96,13 +101,43 @@ HicStatus HicRobotStateObserver::updateJointState(
 	const double* jointVelocity,
 	const double* jointAcceleration)
 {
+#ifdef HIC_ENABLE_DEBUG_PRINT
+	static int debug_update_joint_state_count = 0;
+	const bool should_debug_print = shouldDebugPrint(debug_update_joint_state_count);
+	if (should_debug_print)
+	{
+		std::fprintf(stderr,
+			"[HicRobotStateObserver::updateJointState] entered, initialized=%d jointCount=%d\n",
+			initialized_ ? 1 : 0,
+			config_.jointCount);
+		std::fflush(stderr);
+	}
+#endif
 	if (!initialized_)
 	{
+#ifdef HIC_ENABLE_DEBUG_PRINT
+		if (should_debug_print)
+		{
+			std::fprintf(stderr,
+				"[HicRobotStateObserver::updateJointState] return status=%d: not initialized\n",
+				static_cast<int>(HIC_STATUS_ERROR_INIT));
+			std::fflush(stderr);
+		}
+#endif
 		return HIC_STATUS_ERROR_INIT;
 	}
 	if (!jointPosition || !jointVelocity || !jointAcceleration)
 	{
 		stateValid_ = false;
+#ifdef HIC_ENABLE_DEBUG_PRINT
+		if (should_debug_print)
+		{
+			std::fprintf(stderr,
+				"[HicRobotStateObserver::updateJointState] return status=%d: null input\n",
+				static_cast<int>(HIC_STATUS_ERROR_NULL_POINTER));
+			std::fflush(stderr);
+		}
+#endif
 		return HIC_STATUS_ERROR_NULL_POINTER;
 	}
 
@@ -132,39 +167,82 @@ HicStatus HicRobotStateObserver::updateJointState(
 		rawJointAcceleration_[i] = jointAcceleration[i];
 	}
 
-	applyFirstOrderFilter(
-		rawJointPosition_, filteredJointPosition_, config_.positionFilterAlpha,
+	applyFirstOrderFilter(rawJointPosition_, filteredJointPosition_, config_.positionFilterAlpha,
 		config_.jointCount, config_.enablePositionFilter);
-	applyFirstOrderFilter(
-		rawJointVelocity_, filteredJointVelocity_, config_.velocityFilterAlpha,
+	applyFirstOrderFilter(rawJointVelocity_, filteredJointVelocity_, config_.velocityFilterAlpha,
 		config_.jointCount, config_.enableVelocityFilter);
-	applyFirstOrderFilter(
-		rawJointAcceleration_, filteredJointAcceleration_, config_.accelerationFilterAlpha,
+	applyFirstOrderFilter(rawJointAcceleration_, filteredJointAcceleration_, config_.accelerationFilterAlpha,
 		config_.jointCount, config_.enableAccelerationFilter);
 
 	status = validateStateRange();
 	stateValid_ = (status == HIC_STATUS_OK);
+#ifdef HIC_ENABLE_DEBUG_PRINT
+	if (should_debug_print)
+	{
+		std::fprintf(stderr,
+			"[HicRobotStateObserver::updateJointState] validateStateRange status=%d stateValid=%d\n",
+			static_cast<int>(status),
+			stateValid_ ? 1 : 0);
+		std::fflush(stderr);
+	}
+#endif
 	return status;
 }
 
 HicStatus HicRobotStateObserver::updateMotorCurrent(const double* motorCurrent)
 {
-	// 更新电机电流并估算关节侧电机力矩。
-	// 外部输入 motorCurrent 单位为 A；本函数先按配置做电流滤波，
-	// 然后调用 estimateMotorTorque() 将电流换算为关节侧估计力矩。
+#ifdef HIC_ENABLE_DEBUG_PRINT
+	static int debug_update_current_count = 0;
+	const bool should_debug_print = shouldDebugPrint(debug_update_current_count);
+	if (should_debug_print)
+	{
+		std::fprintf(stderr,
+			"[HicRobotStateObserver::updateMotorCurrent] entered, initialized=%d jointCount=%d\n",
+			initialized_ ? 1 : 0,
+			config_.jointCount);
+		std::fflush(stderr);
+	}
+#endif
 	if (!initialized_)
 	{
+#ifdef HIC_ENABLE_DEBUG_PRINT
+		if (should_debug_print)
+		{
+			std::fprintf(stderr,
+				"[HicRobotStateObserver::updateMotorCurrent] return status=%d: not initialized\n",
+				static_cast<int>(HIC_STATUS_ERROR_INIT));
+			std::fflush(stderr);
+		}
+#endif
 		return HIC_STATUS_ERROR_INIT;
 	}
 	if (!motorCurrent)
 	{
 		stateValid_ = false;
+#ifdef HIC_ENABLE_DEBUG_PRINT
+		if (should_debug_print)
+		{
+			std::fprintf(stderr,
+				"[HicRobotStateObserver::updateMotorCurrent] return status=%d: motorCurrent=null\n",
+				static_cast<int>(HIC_STATUS_ERROR_NULL_POINTER));
+			std::fflush(stderr);
+		}
+#endif
 		return HIC_STATUS_ERROR_NULL_POINTER;
 	}
 
 	const HicStatus status = validateArrayFinite(motorCurrent, config_.jointCount);
 	if (status != HIC_STATUS_OK)
 	{
+#ifdef HIC_ENABLE_DEBUG_PRINT
+		if (should_debug_print)
+		{
+			std::fprintf(stderr,
+				"[HicRobotStateObserver::updateMotorCurrent] motorCurrent invalid, status=%d\n",
+				static_cast<int>(status));
+			std::fflush(stderr);
+		}
+#endif
 		stateValid_ = false;
 		return status;
 	}
@@ -174,23 +252,47 @@ HicStatus HicRobotStateObserver::updateMotorCurrent(const double* motorCurrent)
 		rawMotorCurrent_[i] = motorCurrent[i];
 	}
 
-	// 电流滤波公式：
-	// filtered = (1 - alpha) * previousFiltered + alpha * rawCurrent。
-	// 若 enableMotorCurrentFilter 为 false，则 filteredMotorCurrent_ 直接等于 rawMotorCurrent_。
 	applyFirstOrderFilter(
 		rawMotorCurrent_, filteredMotorCurrent_, config_.motorCurrentFilterAlpha,
 		config_.jointCount, config_.enableMotorCurrentFilter);
 
-	// 使用滤波后的电流计算关节侧估计力矩，避免原始电流噪声直接进入外力矩观测链路。
 	const HicStatus torqueStatus = estimateMotorTorque();
 	if (torqueStatus != HIC_STATUS_OK)
 	{
+#ifdef HIC_ENABLE_DEBUG_PRINT
+		if (should_debug_print)
+		{
+			std::fprintf(stderr,
+				"[HicRobotStateObserver::updateMotorCurrent] estimateMotorTorque status=%d\n",
+				static_cast<int>(torqueStatus));
+			std::fflush(stderr);
+		}
+#endif
 		stateValid_ = false;
 		return torqueStatus;
 	}
 
 	const HicStatus rangeStatus = validateStateRange();
 	stateValid_ = (rangeStatus == HIC_STATUS_OK);
+#ifdef HIC_ENABLE_DEBUG_PRINT
+	if (should_debug_print)
+	{
+		std::fprintf(stderr,
+			"[HicRobotStateObserver::updateMotorCurrent] validateStateRange status=%d stateValid=%d\n",
+			static_cast<int>(rangeStatus),
+			stateValid_ ? 1 : 0);
+		for (int i = 0; i < config_.jointCount; ++i)
+		{
+			std::fprintf(stderr,
+				"  current[%d] raw=%.6f filtered=%.6f tauEst=%.6f\n",
+				i,
+				rawMotorCurrent_[i],
+				filteredMotorCurrent_[i],
+				motorEstimatedTorque_[i]);
+		}
+		std::fflush(stderr);
+	}
+#endif
 	return rangeStatus;
 }
 
@@ -232,31 +334,78 @@ HicStatus HicRobotStateObserver::updateRobotState(
 	const double* motorCurrent,
 	double currentTime)
 {
-	// 高频状态观测入口，供 hic_update_state_estimates() 间接调用。
-	// 输入已经在 C API 边界转换为内部单位：jointPosition 为 rad，motorCurrent 为 A。
-	// 本函数负责：
-	// 1. 用时间戳和上一拍位置差分估计 dq/ddq；
-	// 2. 调用 updateJointState() 完成 q/dq/ddq 滤波与范围检查；
-	// 3. 调用 updateMotorCurrent() 完成电流滤波和 motorEstimatedTorque 估计；
-	// 4. 保存上一拍状态，供下一周期继续差分。
+#ifdef HIC_ENABLE_DEBUG_PRINT
+	static int debug_update_robot_state_count = 0;
+	const bool should_debug_print = shouldDebugPrint(debug_update_robot_state_count);
+	if (should_debug_print)
+	{
+		std::fprintf(stderr,
+			"[HicRobotStateObserver::updateRobotState] entered, initialized=%d jointCount=%d t=%.6f hasPrevious=%d\n",
+			initialized_ ? 1 : 0,
+			config_.jointCount,
+			currentTime,
+			hasPreviousState_ ? 1 : 0);
+		std::fflush(stderr);
+	}
+#endif
 	if (!initialized_)
 	{
+#ifdef HIC_ENABLE_DEBUG_PRINT
+		if (should_debug_print)
+		{
+			std::fprintf(stderr,
+				"[HicRobotStateObserver::updateRobotState] return status=%d: not initialized\n",
+				static_cast<int>(HIC_STATUS_ERROR_INIT));
+			std::fflush(stderr);
+		}
+#endif
 		return HIC_STATUS_ERROR_INIT;
 	}
 	if (!jointPosition || !motorCurrent)
 	{
 		stateValid_ = false;
+#ifdef HIC_ENABLE_DEBUG_PRINT
+		if (should_debug_print)
+		{
+			std::fprintf(stderr,
+				"[HicRobotStateObserver::updateRobotState] return status=%d: jointPosition=%p motorCurrent=%p\n",
+				static_cast<int>(HIC_STATUS_ERROR_NULL_POINTER),
+				static_cast<const void*>(jointPosition),
+				static_cast<const void*>(motorCurrent));
+			std::fflush(stderr);
+		}
+#endif
 		return HIC_STATUS_ERROR_NULL_POINTER;
 	}
 	if (!std::isfinite(currentTime))
 	{
 		stateValid_ = false;
+#ifdef HIC_ENABLE_DEBUG_PRINT
+		if (should_debug_print)
+		{
+			std::fprintf(stderr,
+				"[HicRobotStateObserver::updateRobotState] return status=%d: currentTime invalid %.6f\n",
+				static_cast<int>(HIC_STATUS_ERROR_INVALID_PARAM),
+				currentTime);
+			std::fflush(stderr);
+		}
+#endif
 		return HIC_STATUS_ERROR_INVALID_PARAM;
 	}
+
 	const HicStatus positionStatus = validateArrayFinite(jointPosition, config_.jointCount);
 	if (positionStatus != HIC_STATUS_OK)
 	{
 		stateValid_ = false;
+#ifdef HIC_ENABLE_DEBUG_PRINT
+		if (should_debug_print)
+		{
+			std::fprintf(stderr,
+				"[HicRobotStateObserver::updateRobotState] jointPosition invalid status=%d\n",
+				static_cast<int>(positionStatus));
+			std::fflush(stderr);
+		}
+#endif
 		return positionStatus;
 	}
 
@@ -265,7 +414,6 @@ HicStatus HicRobotStateObserver::updateRobotState(
 	double dt = config_.controlPeriod;
 	if (hasPreviousState_)
 	{
-		// 优先使用外部时间戳计算真实采样间隔；时间戳异常时退回配置周期，避免速度估计发散。
 		dt = currentTime - previousTimestamp_;
 		if (!std::isfinite(dt) || dt <= 0.0)
 		{
@@ -277,25 +425,40 @@ HicStatus HicRobotStateObserver::updateRobotState(
 	{
 		if (!hasPreviousState_)
 		{
-			// 第一帧没有历史位置，速度/加速度从 0 起步，避免制造假脉冲。
 			estimatedVelocity[i] = 0.0;
 			estimatedAcceleration[i] = 0.0;
 			continue;
 		}
-
 		estimatedVelocity[i] = (jointPosition[i] - previousJointPosition_[i]) / dt;
 		estimatedAcceleration[i] = (estimatedVelocity[i] - previousJointVelocity_[i]) / dt;
 	}
 
 	HicStatus status = updateJointState(jointPosition, estimatedVelocity, estimatedAcceleration);
+#ifdef HIC_ENABLE_DEBUG_PRINT
+	if (should_debug_print)
+	{
+		std::fprintf(stderr,
+			"[HicRobotStateObserver::updateRobotState] updateJointState status=%d dt=%.9f\n",
+			static_cast<int>(status),
+			dt);
+		std::fflush(stderr);
+	}
+#endif
 	if (status != HIC_STATUS_OK)
 	{
 		return status;
 	}
 
-	// 电流更新会在内部根据 torqueConstant、gearRatio、transmissionEfficiency
-	// 估算关节侧电机力矩 motorEstimatedTorque，后续 coordinator 用它反推外力矩。
 	status = updateMotorCurrent(motorCurrent);
+#ifdef HIC_ENABLE_DEBUG_PRINT
+	if (should_debug_print)
+	{
+		std::fprintf(stderr,
+			"[HicRobotStateObserver::updateRobotState] updateMotorCurrent status=%d\n",
+			static_cast<int>(status));
+		std::fflush(stderr);
+	}
+#endif
 	if (status != HIC_STATUS_OK)
 	{
 		return status;
@@ -583,6 +746,15 @@ HicStatus HicRobotStateObserver::estimateMotorTorque()
 	// 应优先检查 torqueConstant 或电流采样方向是否需要取负。
 	if (!config_.enableCurrentToTorqueEstimate)
 	{
+#ifdef HIC_ENABLE_DEBUG_PRINT
+		static int debug_disabled_count = 0;
+		if (shouldDebugPrint(debug_disabled_count))
+		{
+			std::fprintf(stderr,
+				"[HicRobotStateObserver::estimateMotorTorque] skipped: enableCurrentToTorqueEstimate=false\n");
+			std::fflush(stderr);
+		}
+#endif
 		// 禁用电流反推时，显式清零估计力矩，避免旧值被 coordinator 用于外力矩估计。
 		std::fill(motorEstimatedTorque_, motorEstimatedTorque_ + HIC_MAX_JOINTS, 0.0);
 		return HIC_STATUS_OK;
@@ -602,7 +774,7 @@ HicStatus HicRobotStateObserver::estimateMotorTorque()
 
 #ifdef HIC_ENABLE_DEBUG_PRINT
 	static int debug_count = 0;
-	if ((debug_count++ % 1000) == 0)
+	if (shouldDebugPrint(debug_count))
 	{
 		std::fprintf(stderr, "[HicRobotStateObserver::estimateMotorTorque] jointCount=%d\n", config_.jointCount);
 		for (int i = 0; i < config_.jointCount; ++i)
@@ -618,6 +790,7 @@ HicStatus HicRobotStateObserver::estimateMotorTorque()
 				config_.transmissionEfficiency[i],
 				motorEstimatedTorque_[i]);
 		}
+		std::fflush(stderr);
 	}
 #endif
 
