@@ -443,6 +443,75 @@ void HicControlCoordinator::buildDefaultStateObserverConfig(
 	}
 }
 
+HicStatus HicControlCoordinator::updateExternalTorqueEstimateFromRobotState()
+{
+	// 该函数把“电流反推外力矩”链路接到交互力观测器：
+	// 1. robotStateObserver_ 提供滤波后的 q/dq 和由电机电流估算的关节力矩；
+	// 2. dynamicsAdapter_ 计算当前状态下的模型力矩；
+	// 3. 二者相减得到外界作用在关节上的估计力矩；
+	// 4. forceObserver_ 对该估计值做外力矩低通滤波，供关节阻抗等模式读取。
+	if (!initialized_)
+	{
+		return HIC_STATUS_ERROR_INIT;
+	}
+
+	double q[HIC_MAX_JOINTS] = { 0.0 };
+	double dq[HIC_MAX_JOINTS] = { 0.0 };
+	double motorEstimatedTorque[HIC_MAX_JOINTS] = { 0.0 };
+
+	// Step 1: 从状态观测器读取内部 SI 单位的滤波状态。
+	HicStatus status = robotStateObserver_.getFilteredJointPosition(q);
+	if (status != HIC_STATUS_OK)
+	{
+		return status;
+	}
+	status = robotStateObserver_.getFilteredJointVelocity(dq);
+	if (status != HIC_STATUS_OK)
+	{
+		return status;
+	}
+	status = robotStateObserver_.getMotorEstimatedTorque(motorEstimatedTorque);
+	if (status != HIC_STATUS_OK)
+	{
+		return status;
+	}
+
+	// Step 2: 计算需要从电机估计力矩中扣掉的模型力矩。
+	// 当前重力项必须可用；科氏/摩擦后端若尚未实现，则保持零向量继续运行。
+	double gravityTorque[HIC_MAX_JOINTS] = { 0.0 };
+	double coriolisTorque[HIC_MAX_JOINTS] = { 0.0 };
+	double frictionTorque[HIC_MAX_JOINTS] = { 0.0 };
+
+	status = dynamicsAdapter_.computeGravityTorque(q, gravityTorque);
+	if (status != HIC_STATUS_OK)
+	{
+		return status;
+	}
+
+	status = dynamicsAdapter_.computeCoriolisTorque(q, dq, coriolisTorque);
+	if (status != HIC_STATUS_OK && status != HIC_STATUS_ERROR_NOT_IMPLEMENTED)
+	{
+		return status;
+	}
+
+	status = dynamicsAdapter_.computeFrictionTorque(dq, frictionTorque);
+	if (status != HIC_STATUS_OK && status != HIC_STATUS_ERROR_NOT_IMPLEMENTED)
+	{
+		return status;
+	}
+
+	// Step 3: 外力矩估计 = 电机电流反推关节力矩 - 模型补偿力矩。
+	double jointExternalTorque[HIC_MAX_JOINTS] = { 0.0 };
+	for (int i = 0; i < config_.jointCount; ++i)
+	{
+		const double modelTorque = gravityTorque[i] + coriolisTorque[i] + frictionTorque[i];
+		jointExternalTorque[i] = motorEstimatedTorque[i] - modelTorque;
+	}
+
+	// Step 4: 送入交互力观测器，统一使用 externalTorqueFilterAlpha 做滤波。
+	return forceObserver_.updateJointExternalTorque(jointExternalTorque);
+}
+
 HicStatus HicControlCoordinator::rebuildStateObserverConfig()
 {
 	// 当外部通过 setXXXLimits / setMotorTorqueConversionParameters 等接口修改配置后，
@@ -512,6 +581,15 @@ HicStatus HicControlCoordinator::updateRobotState(
 		jointPosition, motorCurrent, currentTime);
 	if (status == HIC_STATUS_OK)
 	{
+		// 高频状态输入成功后立即刷新外力矩估计。
+		// 这样后续关节阻抗模式启用外力矩补偿时，可以直接从 forceObserver_ 读取滤波后的 tau_ext_hat。
+		const HicStatus externalTorqueStatus = updateExternalTorqueEstimateFromRobotState();
+		if (externalTorqueStatus != HIC_STATUS_OK)
+		{
+			lastStatus_ = externalTorqueStatus;
+			return lastStatus_;
+		}
+
 		// 一旦底层状态更新成功，依赖该状态的控制命令缓存就不再可信，必须失效。
 		currentTime_ = currentTime;
 		invalidateCommandCache();
@@ -1727,6 +1805,8 @@ HicStatus HicControlCoordinator::computeForceControlTorqueCommand(
 	double* jointTorqueCommand,
 	bool* jointProtectionStatus)
 {
+	// 力控模式的统一力矩分发入口。
+	// 外部 hic_get_force_control_torque_commands() 只调用这里，具体算法由 forceControlMode_ 决定。
 	if (!initialized_)
 	{
 		lastStatus_ = HIC_STATUS_ERROR_INIT;
@@ -1761,37 +1841,56 @@ HicStatus HicControlCoordinator::computeForceControlCurrentCommand(
 	double* motorCurrentCommand,
 	bool* jointProtectionStatus)
 {
+	// 力控模式的统一电流输出入口。
+	// 所有力控子模式先走 computeForceControlTorqueCommand() 得到关节力矩，
+	// 再统一复用 convertTorqueToCurrent()，避免在电流层为每个模式重复写分支。
+	// 对关节阻抗模式来说，本函数的完整路径是：
+	// hic_get_force_control_current_commands()
+	//   -> computeForceControlCurrentCommand()
+	//   -> computeForceControlTorqueCommand()
+	//   -> computeJointImpedanceTorqueCommand()
+	//   -> convertTorqueToCurrent()
 	if (!initialized_)
 	{
+		// coordinator 尚未完成 initialize()，不能输出任何电流命令。
 		lastStatus_ = HIC_STATUS_ERROR_INIT;
 		return lastStatus_;
 	}
 	if (!motorCurrentCommand || !jointProtectionStatus)
 	{
+		// 输出数组由外部提供，空指针时直接报错，避免写非法内存。
 		lastStatus_ = HIC_STATUS_ERROR_NULL_POINTER;
 		return lastStatus_;
 	}
 
+	// 先清空输出，保证后续任何错误返回都不会让调用方误用旧命令。
 	clearCurrentCommand(motorCurrentCommand);
 	clearProtectionStatus(jointProtectionStatus);
 
 	double jointTorqueCommand[HIC_MAX_JOINTS] = { 0.0 };
+	// Step 1: 统一计算当前力控子模式下的关节力矩命令。
+	// 具体是零力、笛卡尔阻抗还是关节阻抗，由 forceControlMode_ 在该函数内部继续分发。
 	HicStatus status = computeForceControlTorqueCommand(jointTorqueCommand, jointProtectionStatus);
 	if (status != HIC_STATUS_OK && status != HIC_STATUS_ERROR_CURRENT_LIMIT)
 	{
+		// 除了“命令已被限幅”这种可继续使用的状态，其他错误都不允许继续转电流。
 		clearCurrentCommand(motorCurrentCommand);
 		lastStatus_ = status;
 		return lastStatus_;
 	}
 
+	// Step 2: 将关节力矩命令转换为电机电流命令。
+	// 换算依赖 torqueConstant、gearRatio、transmissionEfficiency。
 	const HicStatus convertStatus = convertTorqueToCurrent(jointTorqueCommand, motorCurrentCommand);
 	if (convertStatus != HIC_STATUS_OK)
 	{
+		// 电流换算失败时同样清空输出，避免外部驱动器拿到不可信命令。
 		clearCurrentCommand(motorCurrentCommand);
 		lastStatus_ = convertStatus;
 		return lastStatus_;
 	}
 
+	// 保留力矩计算阶段的状态码；若力矩阶段触发限幅，电流数组仍然是限幅后的可用命令。
 	lastStatus_ = status;
 	return lastStatus_;
 }
@@ -2022,6 +2121,12 @@ HicStatus HicControlCoordinator::computeJointImpedanceTorqueCommand(
 	double* jointTorqueCommand,
 	bool* jointProtectionStatus)
 {
+	// 关节空间阻抗模式完整链路：
+	// 1. 从 robotStateObserver_ 读取滤波后的 q/dq；
+	// 2. 按需从 forceObserver_ 读取滤波后的外力矩 tau_ext_hat；
+	// 3. jointImpedanceCore_ 只计算关节空间 PD 阻抗力矩；
+	// 4. coordinator 叠加重力/科氏等动力学补偿；
+	// 5. 最后统一调用 applySafetyLimits()，复用现有安全保护链路。
 	if (!initialized_)
 	{
 		lastStatus_ = HIC_STATUS_ERROR_INIT;
@@ -2055,6 +2160,7 @@ HicStatus HicControlCoordinator::computeJointImpedanceTorqueCommand(
 
 	double q[HIC_MAX_JOINTS] = { 0.0 };
 	double dq[HIC_MAX_JOINTS] = { 0.0 };
+	// Step 1: 读取滤波后的关节位置和速度，单位分别为 rad、rad/s。
 	HicStatus status = robotStateObserver_.getFilteredJointPosition(q);
 	if (status != HIC_STATUS_OK)
 	{
@@ -2077,6 +2183,7 @@ HicStatus HicControlCoordinator::computeJointImpedanceTorqueCommand(
 	const double* tauExtPtr = nullptr;
 	if (jointImpedanceConfig_.enableExternalTorqueCompensation)
 	{
+		// Step 2: 外力矩补偿启用时，读取由电流反推链路或外部接口更新的滤波外力矩。
 		status = forceObserver_.getFilteredJointExternalTorque(tauExt);
 		if (status != HIC_STATUS_OK)
 		{
@@ -2087,6 +2194,7 @@ HicStatus HicControlCoordinator::computeJointImpedanceTorqueCommand(
 	}
 
 	double tauImp[HIC_MAX_JOINTS] = { 0.0 };
+	// Step 3: 核心类只做关节阻抗数学，不负责动力学补偿、模式状态或安全限幅。
 	status = jointImpedanceCore_.computeJointTorque(q, dq, tauExtPtr, tauImp);
 	if (status != HIC_STATUS_OK)
 	{
@@ -2096,6 +2204,7 @@ HicStatus HicControlCoordinator::computeJointImpedanceTorqueCommand(
 
 	double tauGravity[HIC_MAX_JOINTS] = { 0.0 };
 	double tauCoriolis[HIC_MAX_JOINTS] = { 0.0 };
+	// Step 4: 在 coordinator 层叠加已有动力学补偿，避免阻抗核心类承担模型职责。
 	status = dynamicsAdapter_.computeGravityTorque(q, tauGravity);
 	if (status != HIC_STATUS_OK)
 	{
@@ -2117,6 +2226,7 @@ HicStatus HicControlCoordinator::computeJointImpedanceTorqueCommand(
 		jointTorqueCommand[i] = tauImp[i] + tauGravity[i] + tauCoriolis[i];
 	}
 
+	// Step 5: 所有关节阻抗输出必须走统一安全链路：硬限位、力矩变化率、力矩幅值限幅。
 	status = applySafetyLimits(q, jointTorqueCommand, jointProtectionStatus);
 	if (status != HIC_STATUS_OK && status != HIC_STATUS_ERROR_CURRENT_LIMIT)
 	{

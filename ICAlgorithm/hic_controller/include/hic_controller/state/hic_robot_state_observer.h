@@ -66,11 +66,18 @@ public:
 	/// @param stateOut 输出滤波后的关节状态与电机估计力矩。
 	HicStatus getRobotState(HicRobotState& stateOut) const;
 
+	/// @brief 读取滤波后的关节位置，单位 rad。
 	HicStatus getFilteredJointPosition(double* jointPosition) const;
+	/// @brief 读取滤波后的关节速度，单位 rad/s。
 	HicStatus getFilteredJointVelocity(double* jointVelocity) const;
+	/// @brief 读取滤波后的关节加速度，单位 rad/s^2。
 	HicStatus getFilteredJointAcceleration(double* jointAcceleration) const;
+	/// @brief 读取滤波后的电机电流，单位 A。
 	HicStatus getFilteredMotorCurrent(double* motorCurrent) const;
+	/// @brief 读取滤波后的关节实测力矩，单位 N.m。
 	HicStatus getFilteredJointMeasuredTorque(double* jointMeasuredTorque) const;
+	/// @brief 读取由电机电流、力矩常数、减速比和传动效率估算的关节侧力矩，单位 N.m。
+	/// @note coordinator 会用该值减去动力学模型力矩，得到关节外力矩估计并送入 forceObserver_。
 	HicStatus getMotorEstimatedTorque(double* motorEstimatedTorque) const;
 
 	/// @brief 返回当前状态是否有效。

@@ -82,6 +82,8 @@ public:
 	HicStatus startForceControlCartesianFixedPoseMode();
 	/// @brief 启动力控模式下的轨迹笛卡尔阻抗模式。
 	HicStatus startForceControlCartesianTrajectoryMode();
+	/// @brief 启动力控模式下的关节空间阻抗模式。
+	/// @note 外部 C API 通过 hic_start_force_control_mode(..., HIC_FORCE_CONTROL_MODE_JOINT_IMPEDANCE) 进入。
 	HicStatus startForceControlJointImpedanceMode();
 	/// @brief 请求退出当前力控模式。
 	/// @note 零力示教走平滑退出；其余笛卡尔力控子模式当前直接回到 IDLE。
@@ -98,7 +100,10 @@ public:
 	HicStatus setNullspaceConfig(const HicNullspaceControlConfig& config);
 	/// @brief 抓取当前关节位置作为零空间参考关节位置。
 	HicStatus captureCurrentJointPositionAsNullspaceTarget();
+	/// @brief 设置关节空间阻抗配置。
+	/// @note 传入时 targetPosition 已在 C API 边界转换为 rad。
 	HicStatus setJointImpedanceConfig(const HicJointImpedanceConfig& config);
+	/// @brief 抓取当前滤波后的关节位置作为关节阻抗平衡点。
 	HicStatus captureCurrentJointPositionAsImpedanceTarget();
 	/// @brief 设置固定点位置保持目标。
 	HicStatus setFixedTargetPosition(const double targetPosition[3]);
@@ -188,6 +193,8 @@ public:
 	HicStatus computeForceControlTorqueCommand(
 		double* jointTorqueCommand,
 		bool* jointProtectionStatus);
+	/// @brief 统一力控电流输出入口。
+	/// @note 包括关节阻抗在内的所有力控模式都先计算力矩，再统一转换为电流。
 	HicStatus computeForceControlCurrentCommand(
 		double* motorCurrentCommand,
 		bool* jointProtectionStatus);
@@ -269,6 +276,10 @@ private:
 	// ============================================================
 	// C. 配置同步与通用工具
 	// ============================================================
+
+	/// @brief 基于电机估计力矩和动力学模型刷新关节外力矩估计。
+	/// @note 该函数在 updateRobotState() 成功后调用，将电流反推链路接入 forceObserver_。
+	HicStatus updateExternalTorqueEstimateFromRobotState();
 
 	/// @brief 将最新 config_ 中与状态观测相关的字段同步回状态观测器。
 	HicStatus rebuildStateObserverConfig();

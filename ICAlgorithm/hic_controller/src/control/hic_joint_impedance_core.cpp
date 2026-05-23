@@ -33,6 +33,8 @@ HicStatus HicJointImpedanceCore::initialize(int jointCount, double controlPeriod
 
 HicStatus HicJointImpedanceCore::setConfig(const HicJointImpedanceConfig& config)
 {
+	// 配置在 C API 边界已经完成单位转换：targetPosition 内部为 rad，
+	// stiffness/damping/targetVelocity/targetAcceleration 均保持 SI 单位。
 	config_ = config;
 	return HIC_STATUS_OK;
 }
@@ -50,6 +52,8 @@ HicStatus HicJointImpedanceCore::captureTargetPosition(const double* jointPositi
 
 	for (int i = 0; i < jointCount_; ++i)
 	{
+		// 抓取当前关节位置作为阻抗平衡点。
+		// 这里接收的是 coordinator 传入的内部 rad 值，不再做 deg/rad 换算。
 		config_.targetPosition[i] = jointPosition[i];
 	}
 	return HIC_STATUS_OK;
@@ -72,6 +76,9 @@ HicStatus HicJointImpedanceCore::computeJointTorque(
 
 	for (int i = 0; i < jointCount_; ++i)
 	{
+		// 关节阻抗核心只负责纯 PD 数学：
+		// tau_imp = Kd * (q_d - q) + Dd * (dq_d - dq)
+		// 若启用外力矩补偿，再减去 tau_ext_hat，使外界扰动不会被等效“顶回去”。
 		const double positionError = config_.targetPosition[i] - jointPosition[i];
 		const double velocityError = config_.targetVelocity[i] - jointVelocity[i];
 		double torque = config_.stiffness[i] * positionError + config_.damping[i] * velocityError;

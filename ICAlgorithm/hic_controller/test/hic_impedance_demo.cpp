@@ -532,7 +532,7 @@ int testJointImpedanceMode()
 	{
 		return status;
 	}
-	status = hic_start_joint_impedance_mode(0);
+	status = hic_start_force_control_mode(0, HIC_FORCE_CONTROL_MODE_JOINT_IMPEDANCE);
 	std::cout << "start joint impedance status: " << status << std::endl;
 	if (status != HIC_STATUS_OK)
 	{

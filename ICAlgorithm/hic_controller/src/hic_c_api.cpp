@@ -382,6 +382,12 @@ int hic_update_state_estimates(RTS_IEC_INT groupId, const HicStateEstimateInput*
 	/// currentTime 主要用于时间对齐和内部差分估计。
 	/// @note jointVelocity / jointAcceleration 不再由外部显式输入，
 	/// 而是交给 robotStateObserver 基于“位置差分 + 时间戳”在内部估计。
+	/// @note 关节阻抗完整链路从这里开始：
+	/// 1. C API 边界将 jointPosition 从 deg 转为内部 rad；
+	/// 2. coordinator 将 q/current/time 送入 robotStateObserver_；
+	/// 3. robotStateObserver_ 滤波并估计 dq/ddq/motorEstimatedTorque；
+	/// 4. coordinator 用 motorEstimatedTorque - dynamicsModelTorque 刷新 forceObserver_ 中的外力矩；
+	/// 5. 后续取力矩/电流命令时，再读取 observer 输出参与关节阻抗计算。
 	if (!coordinatorReady())
 	{
 		return HIC_STATUS_ERROR_INIT;
@@ -466,6 +472,9 @@ int hic_set_joint_impedance_config(
 	RTS_IEC_INT groupId,
 	const HicJointImpedanceConfig* config)
 {
+	/// @brief 设置关节阻抗参数。
+	/// @note 这是 C API 边界函数，外部 targetPosition 使用 deg；进入 coordinator 前统一转换为内部 rad。
+	/// @note stiffness/damping/targetVelocity/targetAcceleration 已按 SI 单位传入，不做换算。
 	if (!coordinatorReady())
 	{
 		return HIC_STATUS_ERROR_INIT;
@@ -855,6 +864,8 @@ int hic_set_cartesian_trajectory_target_zyx_euler(
 
 int hic_start_force_control_mode(RTS_IEC_INT groupId, int force_control_mode)
 {
+	/// @brief 统一启动力控子模式。
+	/// @note 关节阻抗模式通过 HIC_FORCE_CONTROL_MODE_JOINT_IMPEDANCE 进入，不再提供单独的 start API。
 	if (!coordinatorReady())
 	{
 		return HIC_STATUS_ERROR_INIT;
@@ -878,15 +889,6 @@ int hic_start_force_control_mode(RTS_IEC_INT groupId, int force_control_mode)
 	}
 }
 
-int hic_start_joint_impedance_mode(RTS_IEC_INT groupId)
-{
-	if (!coordinatorReady())
-	{
-		return HIC_STATUS_ERROR_INIT;
-	}
-	return g_hicCoordinator->startForceControlJointImpedanceMode();
-}
-
 int hic_prepare_stop_force_control_mode(RTS_IEC_INT groupId)
 {
 	/// @brief 统一的力控模式退出入口。
@@ -904,6 +906,8 @@ int hic_get_force_control_current_commands(
 	bool joint_protection_status[HIC_MAX_JOINTS])
 {
 	/// @brief 力控大类统一电流环目标命令计算结果入口。
+	/// @note 关节阻抗不在电流层另开分支；内部先复用 computeForceControlTorqueCommand() 得到力矩，
+	/// 再通过 convertTorqueToCurrent() 转换为电流。
 	if (!motor_current_commands || !joint_protection_status)
 	{
 		return HIC_STATUS_ERROR_NULL_POINTER;
@@ -925,6 +929,8 @@ int hic_get_force_control_torque_commands(
 	bool joint_protection_status[HIC_MAX_JOINTS])
 {
 	/// @brief 力控大类统一力矩环目标命令计算结果入口。
+	/// @note 当前处于 HIC_FORCE_CONTROL_MODE_JOINT_IMPEDANCE 时，会分发到
+	/// HicControlCoordinator::computeJointImpedanceTorqueCommand()。
 	if (!joint_torque_commands || !joint_protection_status)
 	{
 		return HIC_STATUS_ERROR_NULL_POINTER;

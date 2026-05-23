@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 
 namespace hic
@@ -148,6 +149,9 @@ HicStatus HicRobotStateObserver::updateJointState(
 
 HicStatus HicRobotStateObserver::updateMotorCurrent(const double* motorCurrent)
 {
+	// 更新电机电流并估算关节侧电机力矩。
+	// 外部输入 motorCurrent 单位为 A；本函数先按配置做电流滤波，
+	// 然后调用 estimateMotorTorque() 将电流换算为关节侧估计力矩。
 	if (!initialized_)
 	{
 		return HIC_STATUS_ERROR_INIT;
@@ -170,10 +174,14 @@ HicStatus HicRobotStateObserver::updateMotorCurrent(const double* motorCurrent)
 		rawMotorCurrent_[i] = motorCurrent[i];
 	}
 
+	// 电流滤波公式：
+	// filtered = (1 - alpha) * previousFiltered + alpha * rawCurrent。
+	// 若 enableMotorCurrentFilter 为 false，则 filteredMotorCurrent_ 直接等于 rawMotorCurrent_。
 	applyFirstOrderFilter(
 		rawMotorCurrent_, filteredMotorCurrent_, config_.motorCurrentFilterAlpha,
 		config_.jointCount, config_.enableMotorCurrentFilter);
 
+	// 使用滤波后的电流计算关节侧估计力矩，避免原始电流噪声直接进入外力矩观测链路。
 	const HicStatus torqueStatus = estimateMotorTorque();
 	if (torqueStatus != HIC_STATUS_OK)
 	{
@@ -224,6 +232,13 @@ HicStatus HicRobotStateObserver::updateRobotState(
 	const double* motorCurrent,
 	double currentTime)
 {
+	// 高频状态观测入口，供 hic_update_state_estimates() 间接调用。
+	// 输入已经在 C API 边界转换为内部单位：jointPosition 为 rad，motorCurrent 为 A。
+	// 本函数负责：
+	// 1. 用时间戳和上一拍位置差分估计 dq/ddq；
+	// 2. 调用 updateJointState() 完成 q/dq/ddq 滤波与范围检查；
+	// 3. 调用 updateMotorCurrent() 完成电流滤波和 motorEstimatedTorque 估计；
+	// 4. 保存上一拍状态，供下一周期继续差分。
 	if (!initialized_)
 	{
 		return HIC_STATUS_ERROR_INIT;
@@ -250,6 +265,7 @@ HicStatus HicRobotStateObserver::updateRobotState(
 	double dt = config_.controlPeriod;
 	if (hasPreviousState_)
 	{
+		// 优先使用外部时间戳计算真实采样间隔；时间戳异常时退回配置周期，避免速度估计发散。
 		dt = currentTime - previousTimestamp_;
 		if (!std::isfinite(dt) || dt <= 0.0)
 		{
@@ -261,6 +277,7 @@ HicStatus HicRobotStateObserver::updateRobotState(
 	{
 		if (!hasPreviousState_)
 		{
+			// 第一帧没有历史位置，速度/加速度从 0 起步，避免制造假脉冲。
 			estimatedVelocity[i] = 0.0;
 			estimatedAcceleration[i] = 0.0;
 			continue;
@@ -276,6 +293,8 @@ HicStatus HicRobotStateObserver::updateRobotState(
 		return status;
 	}
 
+	// 电流更新会在内部根据 torqueConstant、gearRatio、transmissionEfficiency
+	// 估算关节侧电机力矩 motorEstimatedTorque，后续 coordinator 用它反推外力矩。
 	status = updateMotorCurrent(motorCurrent);
 	if (status != HIC_STATUS_OK)
 	{
@@ -548,8 +567,23 @@ void HicRobotStateObserver::applyFirstOrderFilter(
 
 HicStatus HicRobotStateObserver::estimateMotorTorque()
 {
+	// 电机电流到关节侧力矩的估算链路。
+	//
+	// 物理含义：
+	// 1. filteredMotorCurrent_[i] 是第 i 关节电机电流，单位 A；
+	// 2. torqueConstant[i] 是电机力矩常数 Kt，单位 N.m/A，表示电机侧每安培产生的力矩；
+	// 3. gearRatio[i] 是减速比，用于从电机侧力矩折算到关节侧；
+	// 4. transmissionEfficiency[i] 是传动效率，用于考虑减速器/传动链损失；
+	// 5. 输出 motorEstimatedTorque_[i] 是关节侧电机估计力矩，单位 N.m。
+	//
+	// 当前公式：
+	// motorEstimatedTorque = filteredMotorCurrent * torqueConstant * gearRatio * transmissionEfficiency
+	//
+	// 符号方向依赖外部电流方向、Kt 符号和关节正方向约定；如果打印出来发现方向反了，
+	// 应优先检查 torqueConstant 或电流采样方向是否需要取负。
 	if (!config_.enableCurrentToTorqueEstimate)
 	{
+		// 禁用电流反推时，显式清零估计力矩，避免旧值被 coordinator 用于外力矩估计。
 		std::fill(motorEstimatedTorque_, motorEstimatedTorque_ + HIC_MAX_JOINTS, 0.0);
 		return HIC_STATUS_OK;
 	}
@@ -565,6 +599,28 @@ HicStatus HicRobotStateObserver::estimateMotorTorque()
 		}
 		motorEstimatedTorque_[i] = filteredMotorCurrent_[i] * torqueConstant * gearRatio * efficiency;
 	}
+
+#ifdef HIC_ENABLE_DEBUG_PRINT
+	static int debug_count = 0;
+	if ((debug_count++ % 1000) == 0)
+	{
+		std::fprintf(stderr, "[HicRobotStateObserver::estimateMotorTorque] jointCount=%d\n", config_.jointCount);
+		for (int i = 0; i < config_.jointCount; ++i)
+		{
+			std::fprintf(stderr,
+				"  joint[%d] rawCurrent=%.6f A filteredCurrent=%.6f A "
+				"Kt=%.6f Nm/A gearRatio=%.6f efficiency=%.6f estimatedTorque=%.6f Nm\n",
+				i,
+				rawMotorCurrent_[i],
+				filteredMotorCurrent_[i],
+				config_.torqueConstant[i],
+				config_.gearRatio[i],
+				config_.transmissionEfficiency[i],
+				motorEstimatedTorque_[i]);
+		}
+	}
+#endif
+
 	return HIC_STATUS_OK;
 }
 

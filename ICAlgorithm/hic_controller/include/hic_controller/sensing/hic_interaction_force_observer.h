@@ -23,9 +23,16 @@ public:
 	HicStatus getTorqueSensorConfig(HicTorqueSensorConfig& configOut) const;
 	HicStatus loadTorqueSensorConfigFromFile(const char* filePath);
 	HicStatus updateRawJointTorqueSensor(const double* rawTorqueByHardwareChannel);
+
+	/// @brief 更新关节外力矩估计，单位 N.m。
+	/// @note 该值可以来自外部直接输入，也可以来自 coordinator 的电流反推链路：
+	/// motorEstimatedTorque - dynamicsModelTorque。
 	HicStatus updateJointExternalTorque(const double* jointExternalTorque);
 	HicStatus getCalibratedJointTorqueSensor(double* calibratedJointTorque) const;
 	HicStatus getFilteredJointTorqueSensor(double* filteredJointTorque) const;
+
+	/// @brief 读取滤波后的关节外力矩估计，单位 N.m。
+	/// @note 关节阻抗模式启用 enableExternalTorqueCompensation 时读取该结果。
 	HicStatus getFilteredJointExternalTorque(double* jointExternalTorque) const;
 	HicStatus getTorqueSensorFaultStatus(bool* faultStatus) const;
 

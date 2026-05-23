@@ -157,6 +157,10 @@ HicStatus HicInteractionForceObserver::updateRawJointTorqueSensor(const double* 
 
 HicStatus HicInteractionForceObserver::updateJointExternalTorque(const double* jointExternalTorque)
 {
+	// 更新关节外力矩估计。
+	// 该输入既可以来自外部显式调用，也可以来自 coordinator 的电流反推链路：
+	// tau_ext_hat_raw = motorEstimatedTorque - dynamicsModelTorque。
+	// 本类只负责合法性检查和低通滤波，不参与阻抗控制律本身。
 	if (!initialized_)
 	{
 		return HIC_STATUS_ERROR_INIT;
@@ -174,6 +178,7 @@ HicStatus HicInteractionForceObserver::updateJointExternalTorque(const double* j
 		}
 		jointExternalTorque_[i] = jointExternalTorque[i];
 	}
+	// 使用 HicTorqueSensorConfig::externalTorqueFilterAlpha 对外力矩估计做低通滤波。
 	applyExternalTorqueFilter();
 	return HIC_STATUS_OK;
 }
@@ -216,6 +221,8 @@ HicStatus HicInteractionForceObserver::getFilteredJointTorqueSensor(double* filt
 
 HicStatus HicInteractionForceObserver::getFilteredJointExternalTorque(double* jointExternalTorque) const
 {
+	// 关节阻抗模式启用外力矩补偿时，会通过该接口读取滤波后的 tau_ext_hat。
+	// 读取函数不重新计算，只返回最近一次 updateJointExternalTorque() 的滤波结果。
 	if (!initialized_)
 	{
 		return HIC_STATUS_ERROR_INIT;

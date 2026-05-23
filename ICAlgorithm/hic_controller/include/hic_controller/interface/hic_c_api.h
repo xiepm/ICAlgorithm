@@ -669,16 +669,10 @@ HIC_EXPORT int hic_set_cartesian_trajectory_target_zyx_euler(RTS_IEC_INT groupId
 ///    定点位姿保持模式。位置和姿态同时约束，可叠加零空间控制。
 /// 4. `HIC_FORCE_CONTROL_MODE_CARTESIAN_TRAJECTORY`
 ///    轨迹笛卡尔阻抗模式。目标位姿和目标速度允许在线刷新。
+/// 5. `HIC_FORCE_CONTROL_MODE_JOINT_IMPEDANCE`
+///    关节空间阻抗模式。按关节位置/速度误差计算阻抗力矩，并叠加动力学补偿和统一安全限幅。
 /// @note HIC_FORCE_CONTROL_MODE_NONE 不是一个“启动模式”，若传入该值将返回参数错误。
 HIC_EXPORT int hic_start_force_control_mode(RTS_IEC_INT groupId,int force_control_mode);
-
-/// @brief 启动关节空间阻抗模式。
-/// @param groupId 控制组编号；通常传 0。
-/// @return HicStatus 状态码。
-/// @note 等价于 hic_start_force_control_mode(groupId, HIC_FORCE_CONTROL_MODE_JOINT_IMPEDANCE)。
-/// @note 启动后可通过 hic_get_force_control_torque_commands() 获取力矩命令，
-///       或通过 hic_get_force_control_current_commands() 获取换算后的电流命令。
-HIC_EXPORT int hic_start_joint_impedance_mode(RTS_IEC_INT groupId);
 
 /// @brief 准备退出当前力控模式。
 HIC_EXPORT int hic_prepare_stop_force_control_mode(RTS_IEC_INT groupId);
