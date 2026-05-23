@@ -998,6 +998,12 @@ int hic_get_force_control_current_commands(
 	double motor_current_commands[HIC_MAX_JOINTS],
 	bool joint_protection_status[HIC_MAX_JOINTS])
 {
+	/// @brief 力控统一电流命令出口。
+	/// @note 外部周期性调用该接口获取最终下发到电机电流环的目标电流。
+	/// 内部链路为：C API -> computeForceControlCurrentCommand()
+	/// -> computeForceControlTorqueCommand() -> 当前力控子模式的力矩计算函数
+	/// -> convertTorqueToCurrent()。
+	/// @note joint_protection_status 表示对应关节在力矩或电流限幅中被保护/截断。
 	if (!motor_current_commands || !joint_protection_status)
 	{
 		return HIC_STATUS_ERROR_NULL_POINTER;
@@ -1018,7 +1024,11 @@ int hic_get_force_control_torque_commands(
 	double joint_torque_commands[HIC_MAX_JOINTS],
 	bool joint_protection_status[HIC_MAX_JOINTS])
 {
-	/// @note 当前处于 HIC_FORCE_CONTROL_MODE_JOINT_IMPEDANCE 时，会分发到
+	/// @brief 力控统一力矩命令出口。
+	/// @note 外部可用该接口直接查看当前力控算法输出的关节侧目标力矩，单位 N.m。
+	/// 与电流命令接口相比，本接口不会执行 torque -> current 换算。
+	/// @note 在关节阻抗模式下，输出通常由阻抗力矩、重力补偿和可选科氏/离心补偿组成，
+	/// 并且已经经过统一安全限幅。
 	if (!joint_torque_commands || !joint_protection_status)
 	{
 		return HIC_STATUS_ERROR_NULL_POINTER;

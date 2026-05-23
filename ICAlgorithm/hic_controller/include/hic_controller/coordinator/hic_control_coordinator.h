@@ -190,6 +190,9 @@ public:
 	HicStatus computeCartesianImpedanceTorqueCommand(
 		double* jointTorqueCommand,
 		bool* jointProtectionStatus);
+	/// @brief 统一力控力矩输出入口。
+	/// @note 根据当前 forceControlMode_ 分发到零力、笛卡尔阻抗或关节阻抗的力矩计算函数。
+	/// 本函数只输出关节侧力矩，不进行电流换算。
 	HicStatus computeForceControlTorqueCommand(
 		double* jointTorqueCommand,
 		bool* jointProtectionStatus);
@@ -253,6 +256,9 @@ private:
 	HicStatus runCartesianImpedanceStep(
 		double* jointTorqueCommand,
 		bool* jointProtectionStatus);
+	/// @brief 计算关节阻抗模式下的关节侧目标力矩。
+	/// @note 链路为：读取 q/dq -> 可选读取外力矩估计 -> 计算阻抗力矩
+	/// -> 叠加重力/科氏补偿 -> 统一安全限幅。
 	HicStatus computeJointImpedanceTorqueCommand(
 		double* jointTorqueCommand,
 		bool* jointProtectionStatus);
@@ -267,8 +273,9 @@ private:
 		double* jointTorqueCommand,
 		bool* jointProtectionStatus);
 
-	/// @brief 将关节力矩命令换算为电机电流命令。
-	/// @note 换算公式依赖 torqueConstant * gearRatio * transmissionEfficiency。
+/// @brief 将关节力矩命令换算为电机电流命令。
+/// @note 换算公式依赖 torqueConstant * gearRatio * transmissionEfficiency。
+/// @note 如果启用了电流限制，换算后的电流会按配置限幅。
 	HicStatus convertTorqueToCurrent(
 		const double* jointTorqueCommand,
 		double* motorCurrentCommand) const;

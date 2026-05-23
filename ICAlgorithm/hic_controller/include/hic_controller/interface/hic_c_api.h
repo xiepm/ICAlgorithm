@@ -688,6 +688,11 @@ HIC_EXPORT int hic_prepare_stop_force_control_mode(RTS_IEC_INT groupId);
 /// @return HicStatus 状态码。
 /// @note 内部会先计算关节力矩命令，再通过电机力矩常数、减速比和传动效率转换为电流。
 /// @note 零力、笛卡尔阻抗、关节阻抗等力控模式统一走该接口，不需要为关节阻抗单独取电流。
+/// @note 调用链：hic_get_force_control_current_commands()
+///       -> computeForceControlCurrentCommand()
+///       -> computeForceControlTorqueCommand()
+///       -> 当前力控子模式的力矩计算函数
+///       -> convertTorqueToCurrent()。
 HIC_EXPORT int hic_get_force_control_current_commands(RTS_IEC_INT groupId,
 	double motor_current_commands[HIC_MAX_JOINTS],
 	bool joint_protection_status[HIC_MAX_JOINTS]);
@@ -699,6 +704,9 @@ HIC_EXPORT int hic_get_force_control_current_commands(RTS_IEC_INT groupId,
 /// @return HicStatus 状态码。
 /// @note 该接口用于调试或直接力矩驱动。关节阻抗模式下输出为：
 ///       阻抗 PD 力矩 + 重力补偿 + 可选科氏/离心补偿，并已通过统一安全限幅。
+/// @note 调用链：hic_get_force_control_torque_commands()
+///       -> computeForceControlTorqueCommand()
+///       -> 当前力控子模式的力矩计算函数。
 HIC_EXPORT int hic_get_force_control_torque_commands(RTS_IEC_INT groupId,
 	double joint_torque_commands[HIC_MAX_JOINTS],
 	bool joint_protection_status[HIC_MAX_JOINTS]);
