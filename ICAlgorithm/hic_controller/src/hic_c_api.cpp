@@ -12,6 +12,7 @@
 #include "hic_controller/coordinator/hic_control_coordinator.h"
 
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <memory>
 
@@ -76,6 +77,19 @@ double degToRad(double deg)
 double mmToM(double mm)
 {
 	return mm * kMmToM;
+}
+
+int clampDebugJointCount(int jointCount)
+{
+	if (jointCount <= 0)
+	{
+		return HIC_MAX_JOINTS;
+	}
+	if (jointCount > HIC_MAX_JOINTS)
+	{
+		return HIC_MAX_JOINTS;
+	}
+	return jointCount;
 }
 
 void fixedZyxEulerDegToQuaternion(
@@ -209,6 +223,37 @@ int hic_set_motor_torque_conversion_parameters(
 	{
 		return readyStatus;
 	}
+
+#ifdef HIC_ENABLE_DEBUG_PRINT
+	if (!torque_constant || !gear_ratio || !transmission_efficiency)
+	{
+		std::fprintf(stderr,
+			"[hic_set_motor_torque_conversion_parameters] group=%d "
+			"torque_constant=%p gear_ratio=%p transmission_efficiency=%p\n",
+			groupId,
+			static_cast<const void*>(torque_constant),
+			static_cast<const void*>(gear_ratio),
+			static_cast<const void*>(transmission_efficiency));
+	}
+	else
+	{
+		const int debug_joint_count = clampDebugJointCount(g_hicCoordinator->getJointCount());
+		std::fprintf(stderr,
+			"[hic_set_motor_torque_conversion_parameters] group=%d jointCount=%d\n",
+			groupId,
+			debug_joint_count);
+		for (int i = 0; i < debug_joint_count; ++i)
+		{
+			std::fprintf(stderr,
+				"  joint[%d] torque_constant=%.6f gear_ratio=%.6f transmission_efficiency=%.6f\n",
+				i,
+				torque_constant[i],
+				gear_ratio[i],
+				transmission_efficiency[i]);
+		}
+	}
+#endif
+
 	return g_hicCoordinator->setMotorTorqueConversionParameters(
 		torque_constant, gear_ratio, transmission_efficiency);
 }
@@ -352,6 +397,29 @@ int hic_update_state_estimates(RTS_IEC_INT groupId, const HicStateEstimateInput*
 		joint_position_rad[i] = degToRad(input->jointPosition[i]);
 	}
 
+#ifdef HIC_ENABLE_DEBUG_PRINT
+	static int debug_count = 0;
+	if ((debug_count++ % 1000) == 0)
+	{
+		const int debug_joint_count = clampDebugJointCount(g_hicCoordinator->getJointCount());
+		std::fprintf(stderr,
+			"[hic_update_state_estimates] group=%d t=%.6f inputJointCount=%d configuredJointCount=%d\n",
+			groupId,
+			input->currentTime,
+			input->jointCount,
+			debug_joint_count);
+		for (int i = 0; i < debug_joint_count; ++i)
+		{
+			std::fprintf(stderr,
+				"  joint[%d] q_deg=%.6f q_rad=%.6f current=%.6f\n",
+				i,
+				input->jointPosition[i],
+				joint_position_rad[i],
+				input->motorCurrent[i]);
+		}
+	}
+#endif
+
 	return g_hicCoordinator->updateRobotState(
 		joint_position_rad, input->motorCurrent, input->currentTime);
 }
@@ -392,6 +460,36 @@ int hic_capture_current_joint_position_as_nullspace_target(RTS_IEC_INT groupId)
 		return HIC_STATUS_ERROR_INIT;
 	}
 	return g_hicCoordinator->captureCurrentJointPositionAsNullspaceTarget();
+}
+
+int hic_set_joint_impedance_config(
+	RTS_IEC_INT groupId,
+	const HicJointImpedanceConfig* config)
+{
+	if (!coordinatorReady())
+	{
+		return HIC_STATUS_ERROR_INIT;
+	}
+	if (!config)
+	{
+		return HIC_STATUS_ERROR_NULL_POINTER;
+	}
+
+	HicJointImpedanceConfig internalConfig = *config;
+	for (int i = 0; i < HIC_MAX_JOINTS; ++i)
+	{
+		internalConfig.targetPosition[i] = degToRad(config->targetPosition[i]);
+	}
+	return g_hicCoordinator->setJointImpedanceConfig(internalConfig);
+}
+
+int hic_capture_current_joint_position_as_impedance_target(RTS_IEC_INT groupId)
+{
+	if (!coordinatorReady())
+	{
+		return HIC_STATUS_ERROR_INIT;
+	}
+	return g_hicCoordinator->captureCurrentJointPositionAsImpedanceTarget();
 }
 
 int hic_set_cartesian_fixed_position_target(RTS_IEC_INT groupId, const double target_position[3])
@@ -457,6 +555,35 @@ int hic_update_raw_joint_torque_sensor(RTS_IEC_INT groupId, const double* raw_to
 	{
 		return HIC_STATUS_ERROR_INIT;
 	}
+
+#ifdef HIC_ENABLE_DEBUG_PRINT
+	if (!raw_torque_by_hardware_channel)
+	{
+		std::fprintf(stderr,
+			"[hic_update_raw_joint_torque_sensor] group=%d raw_torque=null\n",
+			groupId);
+	}
+	else
+	{
+		static int debug_count = 0;
+		if ((debug_count++ % 1000) == 0)
+		{
+			const int debug_joint_count = clampDebugJointCount(g_hicCoordinator->getJointCount());
+			std::fprintf(stderr,
+				"[hic_update_raw_joint_torque_sensor] group=%d jointCount=%d\n",
+				groupId,
+				debug_joint_count);
+			for (int i = 0; i < debug_joint_count; ++i)
+			{
+				std::fprintf(stderr,
+					"  raw_torque[%d]=%.6f\n",
+					i,
+					raw_torque_by_hardware_channel[i]);
+			}
+		}
+	}
+#endif
+
 	return g_hicCoordinator->updateRawJointTorqueSensor(raw_torque_by_hardware_channel);
 }
 
@@ -743,10 +870,21 @@ int hic_start_force_control_mode(RTS_IEC_INT groupId, int force_control_mode)
 		return g_hicCoordinator->startForceControlCartesianFixedPoseMode();
 	case HIC_FORCE_CONTROL_MODE_CARTESIAN_TRAJECTORY:
 		return g_hicCoordinator->startForceControlCartesianTrajectoryMode();
+	case HIC_FORCE_CONTROL_MODE_JOINT_IMPEDANCE:
+		return g_hicCoordinator->startForceControlJointImpedanceMode();
 	case HIC_FORCE_CONTROL_MODE_NONE:
 	default:
 		return HIC_STATUS_ERROR_INVALID_PARAM;
 	}
+}
+
+int hic_start_joint_impedance_mode(RTS_IEC_INT groupId)
+{
+	if (!coordinatorReady())
+	{
+		return HIC_STATUS_ERROR_INIT;
+	}
+	return g_hicCoordinator->startForceControlJointImpedanceMode();
 }
 
 int hic_prepare_stop_force_control_mode(RTS_IEC_INT groupId)
@@ -777,23 +915,8 @@ int hic_get_force_control_current_commands(
 		return HIC_STATUS_ERROR_INIT;
 	}
 
-	const HicForceControlMode forceControlMode = g_hicCoordinator->getForceControlMode();
-	if (forceControlMode == HIC_FORCE_CONTROL_MODE_ZERO_FORCE)
-	{
-		return g_hicCoordinator->computeZeroForceCurrentCommand(
-			motor_current_commands, joint_protection_status);
-	}
-	if (forceControlMode == HIC_FORCE_CONTROL_MODE_CARTESIAN_FIXED_POSITION ||
-	    forceControlMode == HIC_FORCE_CONTROL_MODE_CARTESIAN_FIXED_POSE ||
-	    forceControlMode == HIC_FORCE_CONTROL_MODE_CARTESIAN_TRAJECTORY)
-	{
-		return g_hicCoordinator->computeCartesianImpedanceCurrentCommand(
-			motor_current_commands, joint_protection_status);
-	}
-
-	clearArray(motor_current_commands, HIC_MAX_JOINTS);
-	clearArray(joint_protection_status, HIC_MAX_JOINTS);
-	return HIC_STATUS_ERROR_INVALID_PARAM;
+	return g_hicCoordinator->computeForceControlCurrentCommand(
+		motor_current_commands, joint_protection_status);
 }
 
 int hic_get_force_control_torque_commands(
@@ -813,23 +936,8 @@ int hic_get_force_control_torque_commands(
 		return HIC_STATUS_ERROR_INIT;
 	}
 
-	const HicForceControlMode forceControlMode = g_hicCoordinator->getForceControlMode();
-	if (forceControlMode == HIC_FORCE_CONTROL_MODE_ZERO_FORCE)
-	{
-		return g_hicCoordinator->computeZeroForceTorqueCommand(
-			joint_torque_commands, joint_protection_status);
-	}
-	if (forceControlMode == HIC_FORCE_CONTROL_MODE_CARTESIAN_FIXED_POSITION ||
-	    forceControlMode == HIC_FORCE_CONTROL_MODE_CARTESIAN_FIXED_POSE ||
-	    forceControlMode == HIC_FORCE_CONTROL_MODE_CARTESIAN_TRAJECTORY)
-	{
-		return g_hicCoordinator->computeCartesianImpedanceTorqueCommand(
-			joint_torque_commands, joint_protection_status);
-	}
-
-	clearArray(joint_torque_commands, HIC_MAX_JOINTS);
-	clearArray(joint_protection_status, HIC_MAX_JOINTS);
-	return HIC_STATUS_ERROR_INVALID_PARAM;
+	return g_hicCoordinator->computeForceControlTorqueCommand(
+		joint_torque_commands, joint_protection_status);
 }
 
 int hic_get_robot_state(

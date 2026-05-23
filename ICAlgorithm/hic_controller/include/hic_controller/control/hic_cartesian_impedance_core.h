@@ -1,7 +1,6 @@
 #pragma once
 
-#include "hic_controller/types/hic_config.h"
-#include "hic_controller/types/hic_types.h"
+#include "hic_controller/interface/hic_c_api.h"
 
 namespace hic
 {

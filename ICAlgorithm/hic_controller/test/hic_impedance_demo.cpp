@@ -479,6 +479,125 @@ int testZeroForceRejectNearHardLimit()
 	return status;
 }
 
+int testJointImpedanceMode()
+{
+	std::cout << "\n=== Joint Impedance Mode ===" << std::endl;
+	const HicInitializeConfig initConfig = makeDefaultInitializeConfig();
+	HicControlConfig config = makeDefaultRuntimeConfig(initConfig);
+	int status = initializeDemoController(initConfig, config);
+	if (status != HIC_STATUS_OK)
+	{
+		return status;
+	}
+
+	double zeroDynamics[HIC_MAX_DYNAMIC_PARAMS] = { 0.0 };
+	status = hic_set_dynamics_linear_parameters(0, zeroDynamics);
+	std::cout << "zero dynamics for joint impedance test status: " << status << std::endl;
+	if (status != HIC_STATUS_OK)
+	{
+		return status;
+	}
+
+	const double stiffness[7] = { 200.0, 200.0, 100.0, 100.0, 50.0, 50.0, 20.0 };
+	const double damping[7] = { 28.0, 28.0, 20.0, 20.0, 14.0, 14.0, 9.0 };
+	double qTarget[HIC_MAX_JOINTS] = { 0.10, -0.20, 0.30, 0.20, -0.10, 0.10, 0.15 };
+	double motorCurrent[HIC_MAX_JOINTS] = { 0.05, 0.04, 0.03, 0.02, 0.01, 0.02, 0.03 };
+
+	HicJointImpedanceConfig jointConfig = {};
+	for (int i = 0; i < config.jointCount; ++i)
+	{
+		jointConfig.stiffness[i] = stiffness[i];
+		jointConfig.damping[i] = damping[i];
+		jointConfig.targetPosition[i] = qTarget[i] * kRadToDeg;
+		jointConfig.targetVelocity[i] = 0.0;
+		jointConfig.targetAcceleration[i] = 0.0;
+	}
+	jointConfig.enableExternalTorqueCompensation = false;
+	status = hic_set_joint_impedance_config(0, &jointConfig);
+	std::cout << "set joint impedance config status: " << status << std::endl;
+	if (status != HIC_STATUS_OK)
+	{
+		return status;
+	}
+
+	status = updateState(config, qTarget, motorCurrent, 0.0);
+	std::cout << "joint impedance equilibrium update status: " << status << std::endl;
+	if (status != HIC_STATUS_OK)
+	{
+		return status;
+	}
+	status = hic_capture_current_joint_position_as_impedance_target(0);
+	std::cout << "capture joint impedance target status: " << status << std::endl;
+	if (status != HIC_STATUS_OK)
+	{
+		return status;
+	}
+	status = hic_start_joint_impedance_mode(0);
+	std::cout << "start joint impedance status: " << status << std::endl;
+	if (status != HIC_STATUS_OK)
+	{
+		return status;
+	}
+
+	double baselineTorque[HIC_MAX_JOINTS] = { 0.0 };
+	bool protection[HIC_MAX_JOINTS] = { false };
+	status = hic_get_force_control_torque_commands(0, baselineTorque, protection);
+	std::cout << "joint impedance baseline torque status: " << status << std::endl;
+	printVector("joint impedance baseline torque", baselineTorque, config.jointCount);
+	if (status != HIC_STATUS_OK)
+	{
+		return status;
+	}
+
+	double qDisturbed[HIC_MAX_JOINTS] = { 0.10, -0.20, 0.30, 0.20, -0.10, 0.10, 0.15 };
+	qDisturbed[0] += 0.05;
+	status = updateState(config, qDisturbed, motorCurrent, 1.0);
+	std::cout << "joint impedance disturbed update #0 status: " << status << std::endl;
+	if (status != HIC_STATUS_OK)
+	{
+		return status;
+	}
+	status = updateState(config, qDisturbed, motorCurrent, 2.0);
+	std::cout << "joint impedance disturbed update #1 status: " << status << std::endl;
+	if (status != HIC_STATUS_OK)
+	{
+		return status;
+	}
+
+	double torqueCmd[HIC_MAX_JOINTS] = { 0.0 };
+	status = hic_get_force_control_torque_commands(0, torqueCmd, protection);
+	std::cout << "joint impedance torque status: " << status << std::endl;
+	printVector("joint impedance torque", torqueCmd, config.jointCount);
+	printBoolVector("joint impedance protection", protection, config.jointCount);
+	if (status != HIC_STATUS_OK)
+	{
+		return status;
+	}
+
+	const double joint0Delta = torqueCmd[0] - baselineTorque[0];
+	const bool joint0DirectionOk = joint0Delta < 0.0;
+	const bool joint0MagnitudeOk = std::fabs(joint0Delta + 10.0) < 1.0;
+	bool otherJointsOk = true;
+	for (int i = 1; i < config.jointCount; ++i)
+	{
+		if (std::fabs(torqueCmd[i] - baselineTorque[i]) >= 1.0)
+		{
+			otherJointsOk = false;
+		}
+	}
+
+	std::cout << "joint0 delta: " << joint0Delta << std::endl;
+	std::cout << "joint impedance assertion direction: " << joint0DirectionOk
+		<< ", magnitude: " << joint0MagnitudeOk
+		<< ", other joints: " << otherJointsOk << std::endl;
+	if (!joint0DirectionOk || !joint0MagnitudeOk || !otherJointsOk)
+	{
+		return HIC_STATUS_ERROR_INVALID_PARAM;
+	}
+
+	return hic_prepare_stop_force_control_mode(0);
+}
+
 }
 
 int main()
@@ -500,6 +619,9 @@ int main()
 
 	status = testZeroForceRejectNearHardLimit();
 	std::cout << "zero force near limit final status: " << status << std::endl;
+
+	status = testJointImpedanceMode();
+	std::cout << "joint impedance final status: " << status << std::endl;
 
 	return 0;
 }

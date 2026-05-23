@@ -244,6 +244,7 @@ HicControlCoordinator::HicControlCoordinator()
 	// 构造阶段只做“清零和默认值”工作，不做任何依赖外部配置的初始化。
 	std::memset(&config_, 0, sizeof(config_));
 	std::memset(&nullspaceConfig_, 0, sizeof(nullspaceConfig_));
+	std::memset(&jointImpedanceConfig_, 0, sizeof(jointImpedanceConfig_));
 	std::fill(previousJointTorqueCommand_, previousJointTorqueCommand_ + HIC_MAX_JOINTS, 0.0);
 	std::fill(previousMotorCurrentCommand_, previousMotorCurrentCommand_ + HIC_MAX_JOINTS, 0.0);
 	std::fill(lastJointTorqueCommand_, lastJointTorqueCommand_ + HIC_MAX_JOINTS, 0.0);
@@ -257,6 +258,7 @@ HicControlCoordinator::HicControlCoordinator()
 	std::fill(lastCurrentPose_, lastCurrentPose_ + HIC_POSE_DIM, 0.0);
 	std::fill(lastCurrentTwist_, lastCurrentTwist_ + HIC_CARTESIAN_DIM, 0.0);
 	std::memset(&nullspaceConfig_, 0, sizeof(nullspaceConfig_));
+	std::memset(&jointImpedanceConfig_, 0, sizeof(jointImpedanceConfig_));
 }
 
 HicControlCoordinator::~HicControlCoordinator()
@@ -285,6 +287,7 @@ HicStatus HicControlCoordinator::initialize(const HicControlConfig& config)
 	currentTime_ = 0.0;
 	controlMode_ = HIC_CONTROL_MODE_IDLE;
 	forceControlMode_ = HIC_FORCE_CONTROL_MODE_NONE;
+	std::memset(&jointImpedanceConfig_, 0, sizeof(jointImpedanceConfig_));
 	std::fill(previousJointTorqueCommand_, previousJointTorqueCommand_ + HIC_MAX_JOINTS, 0.0);
 	std::fill(previousMotorCurrentCommand_, previousMotorCurrentCommand_ + HIC_MAX_JOINTS, 0.0);
 	std::fill(lastJointTorqueCommand_, lastJointTorqueCommand_ + HIC_MAX_JOINTS, 0.0);
@@ -319,6 +322,20 @@ HicStatus HicControlCoordinator::initialize(const HicControlConfig& config)
 	}
 
 	status = impedanceCore_.initialize(config.jointCount, config.controlPeriod);
+	if (status != HIC_STATUS_OK)
+	{
+		lastStatus_ = status;
+		return status;
+	}
+
+	status = jointImpedanceCore_.initialize(config.jointCount, config.controlPeriod);
+	if (status != HIC_STATUS_OK)
+	{
+		lastStatus_ = status;
+		return status;
+	}
+	jointImpedanceCore_.reset();
+	status = jointImpedanceCore_.setConfig(jointImpedanceConfig_);
 	if (status != HIC_STATUS_OK)
 	{
 		lastStatus_ = status;
@@ -716,6 +733,21 @@ HicStatus HicControlCoordinator::startForceControlCartesianTrajectoryMode()
 	return lastStatus_;
 }
 
+HicStatus HicControlCoordinator::startForceControlJointImpedanceMode()
+{
+	if (!initialized_)
+	{
+		lastStatus_ = HIC_STATUS_ERROR_INIT;
+		return lastStatus_;
+	}
+
+	controlMode_ = HIC_CONTROL_MODE_FORCE_CONTROL;
+	forceControlMode_ = HIC_FORCE_CONTROL_MODE_JOINT_IMPEDANCE;
+	invalidateCommandCache();
+	lastStatus_ = HIC_STATUS_OK;
+	return lastStatus_;
+}
+
 // ============================================================
 // 5. 控制参数与目标配置
 // 说明：
@@ -765,6 +797,47 @@ HicStatus HicControlCoordinator::captureCurrentJointPositionAsNullspaceTarget()
 	status = impedanceCore_.captureCurrentJointPositionAsNullspaceTarget(state.jointPosition);
 	if (status == HIC_STATUS_OK)
 	{
+		invalidateCommandCache();
+	}
+	lastStatus_ = status;
+	return status;
+}
+
+HicStatus HicControlCoordinator::setJointImpedanceConfig(const HicJointImpedanceConfig& config)
+{
+	jointImpedanceConfig_ = config;
+	const HicStatus status = jointImpedanceCore_.setConfig(config);
+	if (status == HIC_STATUS_OK)
+	{
+		invalidateCommandCache();
+	}
+	lastStatus_ = status;
+	return status;
+}
+
+HicStatus HicControlCoordinator::captureCurrentJointPositionAsImpedanceTarget()
+{
+	if (!initialized_)
+	{
+		lastStatus_ = HIC_STATUS_ERROR_INIT;
+		return lastStatus_;
+	}
+
+	double jointPosition[HIC_MAX_JOINTS] = { 0.0 };
+	HicStatus status = robotStateObserver_.getFilteredJointPosition(jointPosition);
+	if (status != HIC_STATUS_OK)
+	{
+		lastStatus_ = status;
+		return status;
+	}
+
+	status = jointImpedanceCore_.captureTargetPosition(jointPosition);
+	if (status == HIC_STATUS_OK)
+	{
+		for (int i = 0; i < config_.jointCount; ++i)
+		{
+			jointImpedanceConfig_.targetPosition[i] = jointPosition[i];
+		}
 		invalidateCommandCache();
 	}
 	lastStatus_ = status;
@@ -1650,6 +1723,79 @@ HicStatus HicControlCoordinator::computeCartesianImpedanceCurrentCommand(
 // 8. 状态读取、复位与调试
 // ============================================================
 
+HicStatus HicControlCoordinator::computeForceControlTorqueCommand(
+	double* jointTorqueCommand,
+	bool* jointProtectionStatus)
+{
+	if (!initialized_)
+	{
+		lastStatus_ = HIC_STATUS_ERROR_INIT;
+		return lastStatus_;
+	}
+	if (!jointTorqueCommand || !jointProtectionStatus)
+	{
+		lastStatus_ = HIC_STATUS_ERROR_NULL_POINTER;
+		return lastStatus_;
+	}
+
+	switch (forceControlMode_)
+	{
+	case HIC_FORCE_CONTROL_MODE_ZERO_FORCE:
+		return computeZeroForceTorqueCommand(jointTorqueCommand, jointProtectionStatus);
+	case HIC_FORCE_CONTROL_MODE_CARTESIAN_FIXED_POSITION:
+	case HIC_FORCE_CONTROL_MODE_CARTESIAN_FIXED_POSE:
+	case HIC_FORCE_CONTROL_MODE_CARTESIAN_TRAJECTORY:
+		return computeCartesianImpedanceTorqueCommand(jointTorqueCommand, jointProtectionStatus);
+	case HIC_FORCE_CONTROL_MODE_JOINT_IMPEDANCE:
+		return computeJointImpedanceTorqueCommand(jointTorqueCommand, jointProtectionStatus);
+	case HIC_FORCE_CONTROL_MODE_NONE:
+	default:
+		clearTorqueCommand(jointTorqueCommand);
+		clearProtectionStatus(jointProtectionStatus);
+		lastStatus_ = HIC_STATUS_ERROR_INVALID_PARAM;
+		return lastStatus_;
+	}
+}
+
+HicStatus HicControlCoordinator::computeForceControlCurrentCommand(
+	double* motorCurrentCommand,
+	bool* jointProtectionStatus)
+{
+	if (!initialized_)
+	{
+		lastStatus_ = HIC_STATUS_ERROR_INIT;
+		return lastStatus_;
+	}
+	if (!motorCurrentCommand || !jointProtectionStatus)
+	{
+		lastStatus_ = HIC_STATUS_ERROR_NULL_POINTER;
+		return lastStatus_;
+	}
+
+	clearCurrentCommand(motorCurrentCommand);
+	clearProtectionStatus(jointProtectionStatus);
+
+	double jointTorqueCommand[HIC_MAX_JOINTS] = { 0.0 };
+	HicStatus status = computeForceControlTorqueCommand(jointTorqueCommand, jointProtectionStatus);
+	if (status != HIC_STATUS_OK && status != HIC_STATUS_ERROR_CURRENT_LIMIT)
+	{
+		clearCurrentCommand(motorCurrentCommand);
+		lastStatus_ = status;
+		return lastStatus_;
+	}
+
+	const HicStatus convertStatus = convertTorqueToCurrent(jointTorqueCommand, motorCurrentCommand);
+	if (convertStatus != HIC_STATUS_OK)
+	{
+		clearCurrentCommand(motorCurrentCommand);
+		lastStatus_ = convertStatus;
+		return lastStatus_;
+	}
+
+	lastStatus_ = status;
+	return lastStatus_;
+}
+
 HicStatus HicControlCoordinator::getCurrentCartesianState(
 	double* currentPose,
 	double* currentTwist)
@@ -1757,9 +1903,11 @@ HicStatus HicControlCoordinator::reset()
 	std::fill(lastCurrentPose_, lastCurrentPose_ + HIC_POSE_DIM, 0.0);
 	std::fill(lastCurrentTwist_, lastCurrentTwist_ + HIC_CARTESIAN_DIM, 0.0);
 	std::memset(&nullspaceConfig_, 0, sizeof(nullspaceConfig_));
+	std::memset(&jointImpedanceConfig_, 0, sizeof(jointImpedanceConfig_));
 	robotStateObserver_.reset();
 	forceObserver_.reset();
 	impedanceCore_.reset();
+	jointImpedanceCore_.reset();
 	commandInputVersion_ = 0;
 	lastComputedVersion_ = 0;
 	commandCacheValid_ = false;
@@ -1868,6 +2016,124 @@ HicStatus HicControlCoordinator::runCartesianImpedanceStep(
 	lastComputedVersion_ = commandInputVersion_;
 	commandCacheValid_ = true;
 	return status == HIC_STATUS_OK ? HIC_STATUS_OK : status;
+}
+
+HicStatus HicControlCoordinator::computeJointImpedanceTorqueCommand(
+	double* jointTorqueCommand,
+	bool* jointProtectionStatus)
+{
+	if (!initialized_)
+	{
+		lastStatus_ = HIC_STATUS_ERROR_INIT;
+		return lastStatus_;
+	}
+	if (!jointTorqueCommand || !jointProtectionStatus)
+	{
+		lastStatus_ = HIC_STATUS_ERROR_NULL_POINTER;
+		return lastStatus_;
+	}
+
+	clearTorqueCommand(jointTorqueCommand);
+	clearProtectionStatus(jointProtectionStatus);
+
+	if (controlMode_ != HIC_CONTROL_MODE_FORCE_CONTROL ||
+	    forceControlMode_ != HIC_FORCE_CONTROL_MODE_JOINT_IMPEDANCE)
+	{
+		lastStatus_ = HIC_STATUS_ERROR_INVALID_PARAM;
+		return lastStatus_;
+	}
+
+	if (commandCacheValid_ && lastComputedVersion_ == commandInputVersion_)
+	{
+		for (int i = 0; i < config_.jointCount; ++i)
+		{
+			jointTorqueCommand[i] = lastJointTorqueCommand_[i];
+			jointProtectionStatus[i] = lastJointProtectionStatus_[i];
+		}
+		return lastStatus_;
+	}
+
+	double q[HIC_MAX_JOINTS] = { 0.0 };
+	double dq[HIC_MAX_JOINTS] = { 0.0 };
+	HicStatus status = robotStateObserver_.getFilteredJointPosition(q);
+	if (status != HIC_STATUS_OK)
+	{
+		lastStatus_ = status;
+		return lastStatus_;
+	}
+	status = robotStateObserver_.getFilteredJointVelocity(dq);
+	if (status != HIC_STATUS_OK)
+	{
+		lastStatus_ = status;
+		return lastStatus_;
+	}
+	if (!robotStateObserver_.isStateValid())
+	{
+		lastStatus_ = HIC_STATUS_ERROR_ROBOT_STATE;
+		return lastStatus_;
+	}
+
+	double tauExt[HIC_MAX_JOINTS] = { 0.0 };
+	const double* tauExtPtr = nullptr;
+	if (jointImpedanceConfig_.enableExternalTorqueCompensation)
+	{
+		status = forceObserver_.getFilteredJointExternalTorque(tauExt);
+		if (status != HIC_STATUS_OK)
+		{
+			lastStatus_ = status;
+			return lastStatus_;
+		}
+		tauExtPtr = tauExt;
+	}
+
+	double tauImp[HIC_MAX_JOINTS] = { 0.0 };
+	status = jointImpedanceCore_.computeJointTorque(q, dq, tauExtPtr, tauImp);
+	if (status != HIC_STATUS_OK)
+	{
+		lastStatus_ = status;
+		return lastStatus_;
+	}
+
+	double tauGravity[HIC_MAX_JOINTS] = { 0.0 };
+	double tauCoriolis[HIC_MAX_JOINTS] = { 0.0 };
+	status = dynamicsAdapter_.computeGravityTorque(q, tauGravity);
+	if (status != HIC_STATUS_OK)
+	{
+		lastStatus_ = status;
+		return lastStatus_;
+	}
+	if (config_.enableCoriolisCompensation)
+	{
+		status = dynamicsAdapter_.computeCoriolisTorque(q, dq, tauCoriolis);
+		if (status != HIC_STATUS_OK)
+		{
+			lastStatus_ = status;
+			return lastStatus_;
+		}
+	}
+
+	for (int i = 0; i < config_.jointCount; ++i)
+	{
+		jointTorqueCommand[i] = tauImp[i] + tauGravity[i] + tauCoriolis[i];
+	}
+
+	status = applySafetyLimits(q, jointTorqueCommand, jointProtectionStatus);
+	if (status != HIC_STATUS_OK && status != HIC_STATUS_ERROR_CURRENT_LIMIT)
+	{
+		clearTorqueCommand(jointTorqueCommand);
+		lastStatus_ = status;
+		return lastStatus_;
+	}
+
+	for (int i = 0; i < config_.jointCount; ++i)
+	{
+		lastJointTorqueCommand_[i] = jointTorqueCommand[i];
+		lastJointProtectionStatus_[i] = jointProtectionStatus[i];
+	}
+	lastComputedVersion_ = commandInputVersion_;
+	commandCacheValid_ = true;
+	lastStatus_ = status;
+	return lastStatus_;
 }
 
 HicStatus HicControlCoordinator::applySafetyLimits(

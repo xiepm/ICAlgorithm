@@ -3,9 +3,9 @@
 #include <cstdint>
 #include <memory>
 
-#include "hic_controller/types/hic_config.h"
-#include "hic_controller/types/hic_types.h"
+#include "hic_controller/interface/hic_c_api.h"
 #include "hic_controller/control/hic_cartesian_impedance_core.h"
+#include "hic_controller/control/hic_joint_impedance_core.h"
 #include "hic_controller/dynamics/hic_dynamics_adapter.h"
 #include "hic_controller/kinematics/hic_kinematics_adapter.h"
 #include "hic_controller/sensing/hic_interaction_force_observer.h"
@@ -82,6 +82,7 @@ public:
 	HicStatus startForceControlCartesianFixedPoseMode();
 	/// @brief 启动力控模式下的轨迹笛卡尔阻抗模式。
 	HicStatus startForceControlCartesianTrajectoryMode();
+	HicStatus startForceControlJointImpedanceMode();
 	/// @brief 请求退出当前力控模式。
 	/// @note 零力示教走平滑退出；其余笛卡尔力控子模式当前直接回到 IDLE。
 	HicStatus prepareStopForceControlMode();
@@ -97,6 +98,8 @@ public:
 	HicStatus setNullspaceConfig(const HicNullspaceControlConfig& config);
 	/// @brief 抓取当前关节位置作为零空间参考关节位置。
 	HicStatus captureCurrentJointPositionAsNullspaceTarget();
+	HicStatus setJointImpedanceConfig(const HicJointImpedanceConfig& config);
+	HicStatus captureCurrentJointPositionAsImpedanceTarget();
 	/// @brief 设置固定点位置保持目标。
 	HicStatus setFixedTargetPosition(const double targetPosition[3]);
 	/// @brief 设置固定点阻抗目标位姿。
@@ -182,6 +185,12 @@ public:
 	HicStatus computeCartesianImpedanceTorqueCommand(
 		double* jointTorqueCommand,
 		bool* jointProtectionStatus);
+	HicStatus computeForceControlTorqueCommand(
+		double* jointTorqueCommand,
+		bool* jointProtectionStatus);
+	HicStatus computeForceControlCurrentCommand(
+		double* motorCurrentCommand,
+		bool* jointProtectionStatus);
 
 	// ============================================================
 	// 6. 状态读取与调试
@@ -235,6 +244,9 @@ private:
 	/// @brief 执行一次完整的笛卡尔阻抗求解。
 	/// @note 该函数负责状态读取、运动学、动力学、阻抗核以及安全限幅的串联。
 	HicStatus runCartesianImpedanceStep(
+		double* jointTorqueCommand,
+		bool* jointProtectionStatus);
+	HicStatus computeJointImpedanceTorqueCommand(
 		double* jointTorqueCommand,
 		bool* jointProtectionStatus);
 
@@ -299,10 +311,12 @@ private:
 	HicDynamicsAdapter dynamicsAdapter_;
 	/// @brief 笛卡尔阻抗控制核心。
 	HicCartesianImpedanceCore impedanceCore_;
+	HicJointImpedanceCore jointImpedanceCore_;
 	/// @brief 交互力/扭矩感知模块。
 	HicInteractionForceObserver forceObserver_;
 	/// @brief 当前零空间控制配置缓存。
 	HicNullspaceControlConfig nullspaceConfig_;
+	HicJointImpedanceConfig jointImpedanceConfig_;
 
 	// ============================================================
 	// E. 历史命令、缓存与零力模式内部状态

@@ -8,6 +8,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -fvisibility=hidden -fvisibility-inlines-hidden")
 
+option(HIC_ENABLE_DEBUG_PRINT "Enable throttled debug prints in HIC C API hot paths" ON)
+
 set(HIC_EIGEN_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/external/eigen3)
 set(HIC_COMMON_DIR ${CMAKE_CURRENT_SOURCE_DIR}/hic_controller/src/common)
 
@@ -29,6 +31,7 @@ add_library(hic_controller SHARED
     hic_controller/src/dynamics/sevendofDynamics.cpp
     hic_controller/src/dynamics/urDynamics.cpp
     hic_controller/src/control/hic_cartesian_impedance_core.cpp
+    hic_controller/src/control/hic_joint_impedance_core.cpp
     hic_controller/src/state/hic_robot_state_observer.cpp
     hic_controller/src/sensing/hic_interaction_force_observer.cpp
     hic_controller/src/common/hic_frames.cpp
@@ -36,6 +39,10 @@ add_library(hic_controller SHARED
 )
 
 target_compile_definitions(hic_controller PRIVATE HIC_BUILD_SHARED)
+
+if(HIC_ENABLE_DEBUG_PRINT)
+    target_compile_definitions(hic_controller PRIVATE HIC_ENABLE_DEBUG_PRINT)
+endif()
 
 target_include_directories(hic_controller PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/hic_controller/include

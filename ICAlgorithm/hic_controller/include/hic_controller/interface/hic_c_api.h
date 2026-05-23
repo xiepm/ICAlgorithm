@@ -2,7 +2,7 @@
 
 /// @file hic_c_api.h
 /// @brief HIC 对外 C API 入口。
-/// @note 类型定义已拆分到 `hic_c_api_types.h`，本文件只保留导出函数声明。
+/// @note 本文件是对外唯一公共入口，集中定义导出宏、公共类型和函数声明。
 /// @note 内部 coordinator、observer、kinematics、dynamics 统一使用 SI 单位：
 /// 位置/长度使用 m，角度使用 rad，角速度使用 rad/s，角加速度使用 rad/s^2，
 /// 力矩使用 N.m，电流使用 A，时间使用 s。
@@ -10,9 +10,441 @@
 /// 关节角度相关量可按 deg 输入，hic_c_api.cpp 会在输入边界完成到 SI 的换算。
 /// @note 对外输出接口默认继续返回内部 SI 语义，除非某个接口的注释另有明确说明。
 
-#include "hic_controller/interface/hic_export.h"
-#include "hic_controller/types/hic_c_api_types.h"
-#include "hic_controller/types/hic_config.h"
+#include <stdint.h>
+
+#ifndef __cplusplus
+#include <stdbool.h>
+#endif
+
+#if defined(_WIN32) || defined(_WIN64)
+#if defined(HIC_BUILD_SHARED)
+#define HIC_EXPORT __declspec(dllexport)
+#else
+#define HIC_EXPORT __declspec(dllimport)
+#endif
+#else
+#define HIC_EXPORT __attribute__((visibility("default")))
+#endif
+
+typedef int8_t RTS_IEC_BOOL;
+typedef int8_t RTS_BOOL;
+typedef int16_t RTS_IEC_INT;
+typedef int64_t RTS_IEC_LINT;
+typedef double RTS_IEC_LREAL;
+typedef uint16_t RTS_IEC_UINT;
+typedef int32_t RTS_IEC_DINT;
+
+typedef enum HicStatus
+{
+	HIC_STATUS_OK = 0,
+	HIC_STATUS_ERROR_INIT = 1,
+	HIC_STATUS_ERROR_INVALID_PARAM = 2,
+	HIC_STATUS_ERROR_NULL_POINTER = 3,
+	HIC_STATUS_ERROR_ROBOT_STATE = 4,
+	HIC_STATUS_ERROR_KINEMATICS = 5,
+	HIC_STATUS_ERROR_DYNAMICS = 6,
+	HIC_STATUS_ERROR_SINGULARITY = 7,
+	HIC_STATUS_ERROR_CURRENT_LIMIT = 8,
+	HIC_STATUS_ERROR_JOINT_LIMIT = 9,
+	HIC_STATUS_ERROR_NOT_IMPLEMENTED = 10
+} HicStatus;
+
+typedef enum HicControlMode
+{
+	HIC_CONTROL_MODE_IDLE = 0,
+	HIC_CONTROL_MODE_FORCE_CONTROL = 1
+} HicControlMode;
+
+typedef enum HicForceControlMode
+{
+	HIC_FORCE_CONTROL_MODE_NONE = 0,
+	HIC_FORCE_CONTROL_MODE_ZERO_FORCE = 1,
+	HIC_FORCE_CONTROL_MODE_CARTESIAN_FIXED_POSITION = 2,
+	HIC_FORCE_CONTROL_MODE_CARTESIAN_FIXED_POSE = 3,
+	HIC_FORCE_CONTROL_MODE_CARTESIAN_TRAJECTORY = 4,
+	HIC_FORCE_CONTROL_MODE_JOINT_IMPEDANCE = 5
+} HicForceControlMode;
+
+typedef enum HicCommandLoopType
+{
+	HIC_COMMAND_LOOP_CURRENT = 0,
+	HIC_COMMAND_LOOP_TORQUE = 1
+} HicCommandLoopType;
+
+typedef enum HicDimensions
+{
+	HIC_MAX_JOINTS = 16,
+	HIC_CARTESIAN_DIM = 6,
+	HIC_POSE_DIM = 7,
+	HIC_DYNAMIC_PARAM_PER_JOINT = 13,
+	HIC_MAX_DYNAMIC_PARAMS = HIC_MAX_JOINTS * HIC_DYNAMIC_PARAM_PER_JOINT,
+	HIC_MAX_JACOBIAN_SIZE = HIC_CARTESIAN_DIM * HIC_MAX_JOINTS
+} HicDimensions;
+
+typedef struct HicInitializeConfig
+{
+	int jointCount;
+	double controlPeriod;
+	int robotType;
+	double kinematicDHParams[HIC_MAX_JOINTS];
+} HicInitializeConfig;
+
+typedef struct HicControlConfig
+{
+	int jointCount;
+	double controlPeriod;
+	int robotType;
+
+	double kinematicParams[HIC_MAX_JOINTS];
+	double dynamicParams[HIC_MAX_DYNAMIC_PARAMS];
+
+	double torqueConstant[HIC_MAX_JOINTS];
+	double gearRatio[HIC_MAX_JOINTS];
+	double transmissionEfficiency[HIC_MAX_JOINTS];
+
+	double lowerJointTorque[HIC_MAX_JOINTS];
+	double upperJointTorque[HIC_MAX_JOINTS];
+	double maxJointTorque[HIC_MAX_JOINTS];
+	double lowerMotorCurrent[HIC_MAX_JOINTS];
+	double upperMotorCurrent[HIC_MAX_JOINTS];
+	double maxJointCurrent[HIC_MAX_JOINTS];
+	double maxTorqueRate[HIC_MAX_JOINTS];
+	double lowerJointVelocity[HIC_MAX_JOINTS];
+	double upperJointVelocity[HIC_MAX_JOINTS];
+	double lowerJointAcceleration[HIC_MAX_JOINTS];
+	double upperJointAcceleration[HIC_MAX_JOINTS];
+	double upperJointLimit[HIC_MAX_JOINTS];
+	double lowerJointLimit[HIC_MAX_JOINTS];
+
+	bool enableGravityCompensation;
+	bool enableCoriolisCompensation;
+	bool enableTorqueRateLimit;
+	bool enableCurrentLimit;
+} HicControlConfig;
+
+typedef struct HicImpedanceGains
+{
+	double stiffness[HIC_CARTESIAN_DIM];
+	double damping[HIC_CARTESIAN_DIM];
+} HicImpedanceGains;
+
+typedef struct HicNullspaceControlConfig
+{
+	bool enabled;
+	double targetJointPosition[HIC_MAX_JOINTS];
+	double stiffness[HIC_MAX_JOINTS];
+	double damping[HIC_MAX_JOINTS];
+} HicNullspaceControlConfig;
+
+typedef struct HicJointImpedanceConfig
+{
+	double stiffness[HIC_MAX_JOINTS];
+	double damping[HIC_MAX_JOINTS];
+	double targetPosition[HIC_MAX_JOINTS];
+	double targetVelocity[HIC_MAX_JOINTS];
+	double targetAcceleration[HIC_MAX_JOINTS];
+	bool enableExternalTorqueCompensation;
+} HicJointImpedanceConfig;
+
+typedef struct HicRobotStateObserverConfig
+{
+	int jointCount;
+	double controlPeriod;
+
+	bool enablePositionFilter;
+	bool enableVelocityFilter;
+	bool enableAccelerationFilter;
+	bool enableMotorCurrentFilter;
+	bool enableMeasuredTorqueFilter;
+
+	double positionFilterAlpha[HIC_MAX_JOINTS];
+	double velocityFilterAlpha[HIC_MAX_JOINTS];
+	double accelerationFilterAlpha[HIC_MAX_JOINTS];
+	double motorCurrentFilterAlpha[HIC_MAX_JOINTS];
+	double measuredTorqueFilterAlpha[HIC_MAX_JOINTS];
+
+	double lowerJointPosition[HIC_MAX_JOINTS];
+	double upperJointPosition[HIC_MAX_JOINTS];
+	double maxAbsJointPosition[HIC_MAX_JOINTS];
+	double lowerJointVelocity[HIC_MAX_JOINTS];
+	double upperJointVelocity[HIC_MAX_JOINTS];
+	double maxAbsJointVelocity[HIC_MAX_JOINTS];
+	double lowerJointAcceleration[HIC_MAX_JOINTS];
+	double upperJointAcceleration[HIC_MAX_JOINTS];
+	double maxAbsJointAcceleration[HIC_MAX_JOINTS];
+	double lowerMotorCurrent[HIC_MAX_JOINTS];
+	double upperMotorCurrent[HIC_MAX_JOINTS];
+	double maxAbsMotorCurrent[HIC_MAX_JOINTS];
+	double lowerMeasuredTorque[HIC_MAX_JOINTS];
+	double upperMeasuredTorque[HIC_MAX_JOINTS];
+	double maxAbsMeasuredTorque[HIC_MAX_JOINTS];
+
+	double torqueConstant[HIC_MAX_JOINTS];
+	double gearRatio[HIC_MAX_JOINTS];
+	double transmissionEfficiency[HIC_MAX_JOINTS];
+
+	bool enableCurrentToTorqueEstimate;
+} HicRobotStateObserverConfig;
+
+typedef struct HicJointTorqueSensorConfig
+{
+	bool enabled;
+	int jointIndex;
+	int hardwareChannel;
+
+	double ratedCapacityNm;
+	int directionSign;
+
+	double zeroOffsetNm;
+	double scale;
+	double biasNm;
+	double maxValidTorqueNm;
+} HicJointTorqueSensorConfig;
+
+typedef struct HicTorqueSensorConfig
+{
+	char version[16];
+	char unit[16];
+	char sensorLocation[32];
+
+	int jointCount;
+	HicJointTorqueSensorConfig joints[HIC_MAX_JOINTS];
+
+	bool enableTorqueSensorFilter;
+	double torqueSensorFilterAlpha[HIC_MAX_JOINTS];
+
+	bool enableExternalTorqueFilter;
+	double externalTorqueFilterAlpha[HIC_MAX_JOINTS];
+
+	bool enableSaturationCheck;
+	bool enableFaultCheck;
+} HicTorqueSensorConfig;
+
+typedef struct HicRobotState
+{
+	double jointPosition[HIC_MAX_JOINTS];
+	double jointVelocity[HIC_MAX_JOINTS];
+	double jointAcceleration[HIC_MAX_JOINTS];
+	double motorCurrent[HIC_MAX_JOINTS];
+	double jointMeasuredTorque[HIC_MAX_JOINTS];
+	double motorEstimatedTorque[HIC_MAX_JOINTS];
+} HicRobotState;
+
+typedef struct HicCartesianState
+{
+	double pose[HIC_POSE_DIM];
+	double twist[HIC_CARTESIAN_DIM];
+} HicCartesianState;
+
+typedef struct HicStateEstimateInput
+{
+	int jointCount;
+	double commandJointPosition[HIC_MAX_JOINTS];
+	double jointPosition[HIC_MAX_JOINTS];
+	double motorCurrent[HIC_MAX_JOINTS];
+	double currentTime;
+} HicStateEstimateInput;
+
+typedef struct HicJointRangeLimits
+{
+	int jointCount;
+	double lower[HIC_MAX_JOINTS];
+	double upper[HIC_MAX_JOINTS];
+} HicJointRangeLimits;
+
+typedef struct HicJointMaxLimits
+{
+	int jointCount;
+	double maxAbs[HIC_MAX_JOINTS];
+} HicJointMaxLimits;
+
+typedef struct HicDynamicsTorqueTerms
+{
+	int jointCount;
+	double inertiaTorque[HIC_MAX_JOINTS];
+	double gravityTorque[HIC_MAX_JOINTS];
+	double coriolisTorque[HIC_MAX_JOINTS];
+	double frictionTorque[HIC_MAX_JOINTS];
+	double modelTorque[HIC_MAX_JOINTS];
+} HicDynamicsTorqueTerms;
+
+typedef struct HicEstimatedDynamicsTorques
+{
+	HicDynamicsTorqueTerms terms;
+	double externalTorque[HIC_MAX_JOINTS];
+} HicEstimatedDynamicsTorques;
+
+typedef struct HicActiveControlState
+{
+	int controlMode;
+	int forceControlMode;
+	bool supportsCurrentLoop;
+	bool supportsTorqueLoop;
+	bool nullspaceEnabled;
+} HicActiveControlState;
+
+typedef enum HicProtectionReason
+{
+	HIC_PROTECTION_NONE = 0,
+	HIC_PROTECTION_COLLISION = 1,
+	HIC_PROTECTION_JOINT_POSITION_LIMIT = 2,
+	HIC_PROTECTION_JOINT_VELOCITY_LIMIT = 3,
+	HIC_PROTECTION_JOINT_ACCELERATION_LIMIT = 4,
+	HIC_PROTECTION_JOINT_TORQUE_LIMIT = 5,
+	HIC_PROTECTION_MOTOR_CURRENT_LIMIT = 6,
+	HIC_PROTECTION_CONTROL_BOX_CURRENT_LIMIT = 7,
+	HIC_PROTECTION_POWER_MOMENTUM_LIMIT = 8,
+	HIC_PROTECTION_STATE_INVALID = 9,
+	HIC_PROTECTION_PARAM_INVALID = 10
+} HicProtectionReason;
+
+typedef struct HicStateFilterConfig
+{
+	int jointCount;
+	bool enable_position_filter;
+	bool enable_velocity_filter;
+	bool enable_acceleration_filter;
+	bool enable_current_filter;
+	double position_filter_time_constant[HIC_MAX_JOINTS];
+	double velocity_filter_time_constant[HIC_MAX_JOINTS];
+	double acceleration_filter_time_constant[HIC_MAX_JOINTS];
+	double current_filter_time_constant[HIC_MAX_JOINTS];
+} HicStateFilterConfig;
+
+typedef struct HicZeroForceSafetyConfig
+{
+	int jointCount;
+	bool enable_start_safety_check;
+	double start_check_time;
+	bool enable_smooth_exit;
+	double zero_force_exit_velocity_threshold[HIC_MAX_JOINTS];
+	double joint_current_max_abs[HIC_MAX_JOINTS];
+	double control_box_total_current_limit;
+} HicZeroForceSafetyConfig;
+
+typedef struct HicCollisionDetectionConfig
+{
+	int jointCount;
+	bool enable_iso15066_fast_strategy;
+	double collision_stop_threshold[HIC_MAX_JOINTS];
+	double momentum_collision_threshold[HIC_MAX_JOINTS];
+	double zero_force_collision_threshold[HIC_MAX_JOINTS];
+	int collision_recovery_mode;
+} HicCollisionDetectionConfig;
+
+typedef struct HicMotionConstraintStatus
+{
+	int jointCount;
+	bool joint_position_limit_active[HIC_MAX_JOINTS];
+	bool joint_velocity_limit_active[HIC_MAX_JOINTS];
+	bool joint_acceleration_limit_active[HIC_MAX_JOINTS];
+	bool joint_torque_limit_active[HIC_MAX_JOINTS];
+	bool motor_current_limit_active[HIC_MAX_JOINTS];
+	bool any_limit_active;
+	int main_reason;
+} HicMotionConstraintStatus;
+
+typedef struct HicFrictionCompensationConfig
+{
+	int jointCount;
+	bool enable_friction_compensation;
+	double friction_compensation_factor[HIC_MAX_JOINTS];
+	double dynamic_friction_compensation_factor[HIC_MAX_JOINTS];
+	double friction_low_velocity_threshold[HIC_MAX_JOINTS];
+	double actuator_damping[HIC_MAX_JOINTS];
+} HicFrictionCompensationConfig;
+
+typedef struct HicDynamicsComputeInput
+{
+	int jointCount;
+	double joint_position[HIC_MAX_JOINTS];
+	double joint_velocity[HIC_MAX_JOINTS];
+	double joint_acceleration[HIC_MAX_JOINTS];
+} HicDynamicsComputeInput;
+
+typedef HicDynamicsTorqueTerms HicDynamicsComputeOutput;
+
+typedef struct HicWrenchSensorInput
+{
+	double wrench[HIC_CARTESIAN_DIM];
+	int frame_type;
+} HicWrenchSensorInput;
+
+typedef struct HicDualEncoderInput
+{
+	int jointCount;
+	double motor_side_joint_position[HIC_MAX_JOINTS];
+	double joint_side_joint_position[HIC_MAX_JOINTS];
+} HicDualEncoderInput;
+
+typedef struct HicDualEncoderAssistConfig
+{
+	int jointCount;
+	bool enable;
+	double diff_threshold[HIC_MAX_JOINTS];
+} HicDualEncoderAssistConfig;
+
+typedef struct HicPowerMomentumConstraintConfig
+{
+	int jointCount;
+	bool enable_power_constraint;
+	bool enable_momentum_constraint;
+	double max_power;
+	double max_momentum;
+	double joint_power_limit[HIC_MAX_JOINTS];
+} HicPowerMomentumConstraintConfig;
+
+typedef struct HicPowerMomentumConstraintStatus
+{
+	int jointCount;
+	bool constraint_active[HIC_MAX_JOINTS];
+	double joint_velocity_scale[HIC_MAX_JOINTS];
+	double joint_acceleration_scale[HIC_MAX_JOINTS];
+	double electric_power[HIC_MAX_JOINTS];
+	double mechanical_power[HIC_MAX_JOINTS];
+	double momentum[HIC_MAX_JOINTS];
+	bool any_constraint_active;
+} HicPowerMomentumConstraintStatus;
+
+#ifdef __cplusplus
+namespace hic
+{
+using ::HicStatus;
+using ::HicControlMode;
+using ::HicForceControlMode;
+using ::HicCommandLoopType;
+using ::HicDimensions;
+using ::HicInitializeConfig;
+using ::HicControlConfig;
+using ::HicImpedanceGains;
+using ::HicNullspaceControlConfig;
+using ::HicJointImpedanceConfig;
+using ::HicRobotStateObserverConfig;
+using ::HicJointTorqueSensorConfig;
+using ::HicTorqueSensorConfig;
+using ::HicRobotState;
+using ::HicCartesianState;
+using ::HicStateEstimateInput;
+using ::HicJointRangeLimits;
+using ::HicJointMaxLimits;
+using ::HicDynamicsTorqueTerms;
+using ::HicEstimatedDynamicsTorques;
+using ::HicActiveControlState;
+using ::HicProtectionReason;
+using ::HicStateFilterConfig;
+using ::HicZeroForceSafetyConfig;
+using ::HicCollisionDetectionConfig;
+using ::HicMotionConstraintStatus;
+using ::HicFrictionCompensationConfig;
+using ::HicDynamicsComputeInput;
+using ::HicDynamicsComputeOutput;
+using ::HicWrenchSensorInput;
+using ::HicDualEncoderInput;
+using ::HicDualEncoderAssistConfig;
+using ::HicPowerMomentumConstraintConfig;
+using ::HicPowerMomentumConstraintStatus;
+}
+#endif
 
 #define HIC_VERSION_STRING "20260511-v1.1"
 
@@ -134,6 +566,14 @@ HIC_EXPORT int hic_set_force_control_nullspace_config(RTS_IEC_INT groupId,const 
 /// @brief 抓取当前关节位置作为零空间目标。
 HIC_EXPORT int hic_capture_current_joint_position_as_nullspace_target(RTS_IEC_INT groupId);
 
+/// @brief Set joint-space impedance parameters. targetPosition is deg at the C API boundary.
+HIC_EXPORT int hic_set_joint_impedance_config(
+	RTS_IEC_INT groupId,
+	const HicJointImpedanceConfig* config);
+
+/// @brief Capture the current filtered joint position as the joint impedance target.
+HIC_EXPORT int hic_capture_current_joint_position_as_impedance_target(RTS_IEC_INT groupId);
+
 /// @brief 设置定点位置目标，长度为 3，单位 mm。
 HIC_EXPORT int hic_set_cartesian_fixed_position_target(RTS_IEC_INT groupId,const double target_position[3]);
 
@@ -183,6 +623,9 @@ HIC_EXPORT int hic_set_cartesian_trajectory_target_zyx_euler(RTS_IEC_INT groupId
 ///    轨迹笛卡尔阻抗模式。目标位姿和目标速度允许在线刷新。
 /// @note HIC_FORCE_CONTROL_MODE_NONE 不是一个“启动模式”，若传入该值将返回参数错误。
 HIC_EXPORT int hic_start_force_control_mode(RTS_IEC_INT groupId,int force_control_mode);
+
+/// @brief Start joint-space impedance mode.
+HIC_EXPORT int hic_start_joint_impedance_mode(RTS_IEC_INT groupId);
 
 /// @brief 准备退出当前力控模式。
 HIC_EXPORT int hic_prepare_stop_force_control_mode(RTS_IEC_INT groupId);
