@@ -1,0 +1,300 @@
+{
+  "impedanceCommandProtocol": {
+    "description": "通过调试工具的数据发送框发送 ASCII 命令和数字参数来修改阻抗控制参数。",
+    "encoding": "ASCII",
+    "separator": ",",
+    "terminator": ";",
+    "format": "command,param1,param2,...;",
+    "jointIndexBase": 1,
+    "jointCount": 7,
+    "jointScope": "除 impedance_setTimeCycle 外，其余命令第 1 个参数均为 jointIndex，表示要修改的关节编号。",
+    "example": "impedance_setControlGoal,1,2.5,60;"
+  },
+  "impedanceCommands": {
+    "impedance_setTimeCycle": {
+      "description": "设置控制器周期，属于全局参数，不区分关节。",
+      "sendFormat": "impedance_setTimeCycle,timeCycleMs;",
+      "params": [
+        {
+          "index": 1,
+          "name": "timeCycleMs",
+          "type": "int",
+          "unit": "ms",
+          "allowed": [1, 4],
+          "description": "控制器周期，支持 1ms 或 4ms。"
+        }
+      ],
+      "currentValues": {
+        "timeCycleMs": 1
+      },
+      "example": "impedance_setTimeCycle,1;"
+    },
+    "impedance_setControlGoal": {
+      "description": "设置指定关节的目标力矩和目标速度。",
+      "sendFormat": "impedance_setControlGoal,jointIndex,targetTorqueNm,targetVelocityDegPerSec;",
+      "params": [
+        {
+          "index": 1,
+          "name": "jointIndex",
+          "type": "int",
+          "allowed": "1..jointCount",
+          "description": "关节编号，1 表示第 1 关节。"
+        },
+        {
+          "index": 2,
+          "name": "targetTorqueNm",
+          "type": "double",
+          "unit": "N.m",
+          "description": "目标力矩。"
+        },
+        {
+          "index": 3,
+          "name": "targetVelocityDegPerSec",
+          "type": "double",
+          "unit": "deg/s",
+          "range": "> 0",
+          "description": "目标速度，正值。"
+        }
+      ],
+      "currentValues": {
+        "jointIndex": 1,
+        "targetTorqueNm": 2.5,
+        "targetVelocityDegPerSec": 60.0
+      },
+      "example": "impedance_setControlGoal,1,2.5,60;"
+    },
+    "impedance_setJointImpedanceParams": {
+      "description": "设置指定关节的关节空间阻抗参数，其他关节保持当前配置不变。",
+      "mappedApi": "hic_set_single_joint_impedance_config",
+      "sendFormat": "impedance_setJointImpedanceParams,jointIndex,stiffness,damping,targetPositionDeg,targetVelocityRadPerSec,targetAccelerationRadPerSec2,enableExternalTorqueCompensation,externalTorqueSource;",
+      "params": [
+        {
+          "index": 1,
+          "name": "jointIndex",
+          "type": "int",
+          "allowed": "1..jointCount",
+          "description": "关节编号，1 表示第 1 关节。"
+        },
+        {
+          "index": 2,
+          "name": "stiffness",
+          "type": "double",
+          "unit": "N.m/rad",
+          "description": "关节刚度。"
+        },
+        {
+          "index": 3,
+          "name": "damping",
+          "type": "double",
+          "unit": "N.m.s/rad",
+          "description": "关节阻尼。"
+        },
+        {
+          "index": 4,
+          "name": "targetPositionDeg",
+          "type": "double",
+          "unit": "deg",
+          "description": "目标关节位置。"
+        },
+        {
+          "index": 5,
+          "name": "targetVelocityRadPerSec",
+          "type": "double",
+          "unit": "rad/s",
+          "description": "目标关节速度。"
+        },
+        {
+          "index": 6,
+          "name": "targetAccelerationRadPerSec2",
+          "type": "double",
+          "unit": "rad/s^2",
+          "description": "目标关节加速度，当前 PD 控制律暂不使用。"
+        },
+        {
+          "index": 7,
+          "name": "enableExternalTorqueCompensation",
+          "type": "int",
+          "allowed": [0, 1],
+          "description": "是否启用外力矩补偿，0=关闭，1=开启。该开关为整组关节阻抗配置的全局开关。"
+        },
+        {
+          "index": 8,
+          "name": "externalTorqueSource",
+          "type": "int",
+          "allowed": [0, 1],
+          "description": "外力矩补偿来源，0=current，1=sensor。"
+        }
+      ],
+      "currentValues": {
+        "jointIndex": 1,
+        "stiffness": 200.0,
+        "damping": 28.0,
+        "targetPositionDeg": 0.0,
+        "targetVelocityRadPerSec": 0.0,
+        "targetAccelerationRadPerSec2": 0.0,
+        "enableExternalTorqueCompensation": 1,
+        "externalTorqueSource": 1
+      },
+      "example": "impedance_setJointImpedanceParams,1,200,28,0,0,0,1,1;"
+    },
+    "impedance_setPhysicalParams": {
+      "description": "设置指定关节的电机相关参数。",
+      "sendFormat": "impedance_setPhysicalParams,jointIndex,K,N,reserved1,reserved2,reserved3;",
+      "params": [
+        {
+          "index": 1,
+          "name": "jointIndex",
+          "type": "int",
+          "allowed": "1..jointCount",
+          "description": "关节编号，1 表示第 1 关节。"
+        },
+        {
+          "index": 2,
+          "name": "K",
+          "type": "double",
+          "unit": "N.m/A",
+          "description": "力矩常数。"
+        },
+        {
+          "index": 3,
+          "name": "N",
+          "type": "double",
+          "default": 1.0,
+          "description": "减速比。"
+        },
+        {
+          "index": 4,
+          "name": "reserved1",
+          "type": "double",
+          "default": 0.0,
+          "description": "预留。"
+        },
+        {
+          "index": 5,
+          "name": "reserved2",
+          "type": "double",
+          "default": 0.0,
+          "description": "预留。"
+        },
+        {
+          "index": 6,
+          "name": "reserved3",
+          "type": "double",
+          "default": 0.0,
+          "description": "预留。"
+        }
+      ],
+      "currentValues": {
+        "jointIndex": 1,
+        "K": 0.1,
+        "N": 1.0,
+        "reserved1": 0.0,
+        "reserved2": 0.0,
+        "reserved3": 0.0
+      },
+      "example": "impedance_setPhysicalParams,1,0.1,1,0,0,0;"
+    },
+    "impedance_setDynamicsLinearParams": {
+      "description": "设置通用动力学线性参数。兼容旧流程，会同时更新 current/sensor 两套动力学参数。",
+      "mappedApi": "hic_set_dynamics_linear_parameters",
+      "sendFormat": "impedance_setDynamicsLinearParams,p1,p2,...;",
+      "params": [
+        {
+          "index": "1..HIC_MAX_DYNAMIC_PARAMS",
+          "name": "dynamicParam",
+          "type": "double",
+          "description": "动力学线性参数数组。"
+        }
+      ],
+      "derivedValues": {
+        "modelTorque": "兼容字段，等同于 modelTorque_current",
+        "modelTorque_current": "使用电流力矩整定参数计算的模型力矩",
+        "modelTorque_sensor": "使用扭矩传感器整定参数计算的模型力矩"
+      },
+      "example": "impedance_setDynamicsLinearParams,0,0,0;"
+    },
+    "impedance_setDynamicsLinearParams_current": {
+      "description": "设置基于电流力矩整定得到的动力学线性参数，用于计算 modelTorque_current。",
+      "mappedApi": "hic_set_dynamics_linear_parameters_current",
+      "sendFormat": "impedance_setDynamicsLinearParams_current,p1,p2,...;",
+      "params": [
+        {
+          "index": "1..HIC_MAX_DYNAMIC_PARAMS",
+          "name": "dynamicParam_current",
+          "type": "double",
+          "description": "电流力矩整定得到的动力学线性参数数组。"
+        }
+      ],
+      "derivedValues": {
+        "externalTorque_current": "motorEstimatedTorque_current - modelTorque_current"
+      },
+      "example": "impedance_setDynamicsLinearParams_current,0,0,0;"
+    },
+    "impedance_setDynamicsLinearParams_sensor": {
+      "description": "设置基于扭矩传感器整定得到的动力学线性参数，用于计算 modelTorque_sensor。",
+      "mappedApi": "hic_set_dynamics_linear_parameters_sensor",
+      "sendFormat": "impedance_setDynamicsLinearParams_sensor,p1,p2,...;",
+      "params": [
+        {
+          "index": "1..HIC_MAX_DYNAMIC_PARAMS",
+          "name": "dynamicParam_sensor",
+          "type": "double",
+          "description": "扭矩传感器整定得到的动力学线性参数数组。"
+        }
+      ],
+      "derivedValues": {
+        "externalTorque_sensor": "jointMeasuredTorque_sensor - modelTorque_sensor"
+      },
+      "example": "impedance_setDynamicsLinearParams_sensor,0,0,0;"
+    },
+    "impedance_setFrictionParams": {
+      "description": "设置指定关节的摩擦力相关参数。",
+      "sendFormat": "impedance_setFrictionParams,jointIndex,Fc,B,Fs,reserved1;",
+      "params": [
+        {
+          "index": 1,
+          "name": "jointIndex",
+          "type": "int",
+          "allowed": "1..jointCount",
+          "description": "关节编号，1 表示第 1 关节。"
+        },
+        {
+          "index": 2,
+          "name": "Fc",
+          "type": "double",
+          "unit": "N.m",
+          "description": "库伦摩擦力。"
+        },
+        {
+          "index": 3,
+          "name": "B",
+          "type": "double",
+          "unit": "N.m.s/rad",
+          "description": "粘滞摩擦系数。"
+        },
+        {
+          "index": 4,
+          "name": "Fs",
+          "type": "double",
+          "unit": "N.m",
+          "description": "静摩擦力。"
+        },
+        {
+          "index": 5,
+          "name": "reserved1",
+          "type": "double",
+          "default": 0.0,
+          "description": "预留。"
+        }
+      ],
+      "currentValues": {
+        "jointIndex": 1,
+        "Fc": 0.0,
+        "B": 0.0,
+        "Fs": 0.0,
+        "reserved1": 0.0
+      },
+      "example": "impedance_setFrictionParams,1,0.2,0.01,0.3,0;"
+    }
+  }
+}

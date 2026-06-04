@@ -30,13 +30,13 @@ public:
 	/// @brief 计算纯关节阻抗力矩，不含动力学补偿和安全限幅。
 	/// @param jointPosition 当前关节位置，单位 rad。
 	/// @param jointVelocity 当前关节速度，单位 rad/s。
-	/// @param externalTorque 滤波后的外力矩估计，单位 N.m；传 nullptr 时视为全零。
+	/// @param externalTorque_current 滤波后的外力矩估计，单位 N.m；传 nullptr 时视为全零。
 	/// @param jointTorque 输出关节阻抗力矩，单位 N.m。
 	/// @note tau = Kd * (q_d - q) + Dd * (dq_d - dq) - tau_ext_hat。
 	HicStatus computeJointTorque(
 		const double* jointPosition,
 		const double* jointVelocity,
-		const double* externalTorque,
+		const double* externalTorque_current,
 		double* jointTorque);
 
 	/// @brief 读取最近一次计算时的位置误差 q_d - q。

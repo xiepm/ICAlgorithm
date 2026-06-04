@@ -27,11 +27,14 @@ int getExpectedJointCountFromRobotType(int robotType)
 	case 9:
 	case 10:
 	case 12:
-		return 6;
+	
+	return 6;
 	case 20:
-		return 7;
+	
+	return 7;
 	default:
-		return -1;
+	
+	return -1;
 	}
 }
 
@@ -54,7 +57,8 @@ double configuredPositiveAbsLimit(double lower, double upper)
 {
 	if (!hasExplicitRange(lower, upper))
 	{
-		return 0.0;
+	
+	return 0.0;
 	}
 	return std::max(std::fabs(lower), std::fabs(upper));
 }
@@ -63,15 +67,19 @@ double clampToConfiguredRange(double value, double lower, double upper, double s
 {
 	if (hasExplicitRange(lower, upper))
 	{
-		if (lower > upper)
+	
+	if (lower > upper)
 		{
-			return 0.0;
+		
+	return 0.0;
 		}
-		return std::max(lower, std::min(upper, value));
+	
+	return std::max(lower, std::min(upper, value));
 	}
 	if (symmetricAbs > 0.0)
 	{
-		return std::max(-symmetricAbs, std::min(symmetricAbs, value));
+	
+	return std::max(-symmetricAbs, std::min(symmetricAbs, value));
 	}
 	return value;
 }
@@ -115,7 +123,8 @@ double defaultZeroForceDampingValue(int jointIndex)
 	static const double kDefaultDamping[7] = { 1.5, 1.5, 1.2, 0.8, 0.5, 0.3, 0.2 };
 	if (jointIndex >= 0 && jointIndex < 7)
 	{
-		return kDefaultDamping[jointIndex];
+	
+	return kDefaultDamping[jointIndex];
 	}
 	return 0.3;
 }
@@ -127,7 +136,8 @@ double computeZeroForceEntryVelocityLimit(const HicControlConfig& config, int jo
 		config.upperJointVelocity[jointIndex]);
 	if (configuredLimit > 0.0)
 	{
-		return std::max(0.05, std::min(0.3, 0.2 * configuredLimit));
+	
+	return std::max(0.05, std::min(0.3, 0.2 * configuredLimit));
 	}
 	return 0.2;
 }
@@ -135,6 +145,16 @@ double computeZeroForceEntryVelocityLimit(const HicControlConfig& config, int jo
 double computeZeroForceExitVelocityThreshold(const HicControlConfig& config, int jointIndex)
 {
 	return std::min(0.05, 0.5 * computeZeroForceEntryVelocityLimit(config, jointIndex));
+}
+
+double firstOrderAlphaFromTimeConstant(double controlPeriod, double timeConstant)
+{
+	if (controlPeriod <= 0.0 || timeConstant <= 0.0)
+	{
+	
+	return 1.0;
+	}
+	return std::max(0.0, std::min(1.0, controlPeriod / (controlPeriod + timeConstant)));
 }
 
 bool hasValidJointLimitWindow(const HicControlConfig& config, int jointIndex)
@@ -147,7 +167,8 @@ double computeHardLimitMargin(const HicControlConfig& config, int jointIndex)
 {
 	if (!hasValidJointLimitWindow(config, jointIndex))
 	{
-		return 0.0;
+	
+	return 0.0;
 	}
 	const double range = config.upperJointLimit[jointIndex] - config.lowerJointLimit[jointIndex];
 	return std::max(0.01, std::min(0.03, 0.05 * range));
@@ -157,7 +178,8 @@ double computeSoftLimitMargin(const HicControlConfig& config, int jointIndex)
 {
 	if (!hasValidJointLimitWindow(config, jointIndex))
 	{
-		return 0.0;
+	
+	return 0.0;
 	}
 	const double range = config.upperJointLimit[jointIndex] - config.lowerJointLimit[jointIndex];
 	return std::max(0.08, std::min(0.2, 0.15 * range));
@@ -167,11 +189,13 @@ double computeSoftLimitDampingScale(double distanceToLimit, double hardMargin, d
 {
 	if (softMargin <= hardMargin || distanceToLimit >= softMargin)
 	{
-		return 0.0;
+	
+	return 0.0;
 	}
 	if (distanceToLimit <= hardMargin)
 	{
-		return 1.0;
+	
+	return 1.0;
 	}
 	return (softMargin - distanceToLimit) / (softMargin - hardMargin);
 }
@@ -185,15 +209,18 @@ std::shared_ptr<HicControlCoordinator> HicControlCoordinator::create(
 	const HicControlConfig& config)
 {
 	std::shared_ptr<HicControlCoordinator> coordinator =
-		std::make_shared<HicControlCoordinator>();
+	
+	std::make_shared<HicControlCoordinator>();
 	if (!coordinator)
 	{
-		return nullptr;
+	
+	return nullptr;
 	}
 
 	if (coordinator->initialize(config) != HIC_STATUS_OK)
 	{
-		return nullptr;
+	
+	return nullptr;
 	}
 
 	return coordinator;
@@ -213,6 +240,7 @@ HicControlCoordinator::HicControlCoordinator()
 	std::memset(&config_, 0, sizeof(config_));
 	std::memset(&nullspaceConfig_, 0, sizeof(nullspaceConfig_));
 	std::memset(&jointImpedanceConfig_, 0, sizeof(jointImpedanceConfig_));
+	std::memset(&lastEstimatedDynamicsTorques_, 0, sizeof(lastEstimatedDynamicsTorques_));
 	std::fill(previousJointTorqueCommand_, previousJointTorqueCommand_ + HIC_MAX_JOINTS, 0.0);
 	std::fill(previousMotorCurrentCommand_, previousMotorCurrentCommand_ + HIC_MAX_JOINTS, 0.0);
 	std::fill(lastJointTorqueCommand_, lastJointTorqueCommand_ + HIC_MAX_JOINTS, 0.0);
@@ -241,47 +269,51 @@ HicStatus HicControlCoordinator::initialize(const HicControlConfig& config)
 		config.controlPeriod,
 		config.robotType);
 #endif
-	// 关节阻抗模式力矩链路：
-	// 1. 从 robotStateObserver_ 获取滤波后的 q、dq；
-	// 2. 可选读取 forceObserver_ 的外力矩估计，用于外力补偿；
-	// 3. jointImpedanceCore_ 计算阻抗力矩 tauImp；
-	// 4. dynamicsAdapter_ 计算重力补偿和可选科氏/离心补偿；
-	// 5. 叠加得到 jointTorqueCommand，并执行统一安全限幅。
+	// 关节阻抗模式力矩链路�?	// 1. �?robotStateObserver_ 获取滤波后的 q、dq�?	// 2. 可选读�?forceObserver_ 的外力矩估计，用于外力补偿；
+	// 3. jointImpedanceCore_ 计算阻抗力矩 tauImp�?	// 4. dynamicsAdapter_ 计算重力补偿和可选科�?离心补偿�?	// 5. 叠加得到 jointTorqueCommand，并执行统一安全限幅�?
 	if (config.jointCount <= 0 || config.jointCount > HIC_MAX_JOINTS || config.controlPeriod <= 0.0)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INVALID_PARAM;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INVALID_PARAM;
 #ifdef HIC_ENABLE_DEBUG_PRINT
-		std::fprintf(stderr,
+	
+	std::fprintf(stderr,
 			"[HicControlCoordinator::initialize] invalid base config: jointCount=%d range=(1,%d), controlPeriod=%.9f, status=%d\n",
 			config.jointCount,
-			HIC_MAX_JOINTS,
+		
+	HIC_MAX_JOINTS,
 			config.controlPeriod,
 			static_cast<int>(lastStatus_));
 #endif
-		return lastStatus_;
+	
+	return lastStatus_;
 	}
 	const int expectedJointCount = getExpectedJointCountFromRobotType(config.robotType);
 	if (expectedJointCount > 0 && config.jointCount != expectedJointCount)
 	{
 #ifdef HIC_ALLOW_DEBUG_JOINT_COUNT_MISMATCH
 #ifdef HIC_ENABLE_DEBUG_PRINT
-		std::fprintf(stderr,
+	
+	std::fprintf(stderr,
 			"[HicControlCoordinator::initialize] WARNING debug bypass robotType/jointCount mismatch: robotType=%d expectedJointCount=%d actualJointCount=%d\n",
 			config.robotType,
 			expectedJointCount,
 			config.jointCount);
 #endif
 #else
-		lastStatus_ = HIC_STATUS_ERROR_INVALID_PARAM;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INVALID_PARAM;
 #ifdef HIC_ENABLE_DEBUG_PRINT
-		std::fprintf(stderr,
+	
+	std::fprintf(stderr,
 			"[HicControlCoordinator::initialize] robotType/jointCount mismatch: robotType=%d expectedJointCount=%d actualJointCount=%d status=%d\n",
 			config.robotType,
 			expectedJointCount,
 			config.jointCount,
 			static_cast<int>(lastStatus_));
 #endif
-		return lastStatus_;
+	
+	return lastStatus_;
 #endif
 	}
 
@@ -294,6 +326,7 @@ HicStatus HicControlCoordinator::initialize(const HicControlConfig& config)
 	std::fill(previousMotorCurrentCommand_, previousMotorCurrentCommand_ + HIC_MAX_JOINTS, 0.0);
 	std::fill(lastJointTorqueCommand_, lastJointTorqueCommand_ + HIC_MAX_JOINTS, 0.0);
 	std::fill(lastJointProtectionStatus_, lastJointProtectionStatus_ + HIC_MAX_JOINTS, false);
+	std::memset(&lastEstimatedDynamicsTorques_, 0, sizeof(lastEstimatedDynamicsTorques_));
 	std::fill(lastCurrentPose_, lastCurrentPose_ + HIC_POSE_DIM, 0.0);
 	std::fill(lastCurrentTwist_, lastCurrentTwist_ + HIC_CARTESIAN_DIM, 0.0);
 	lastStatus_ = HIC_STATUS_OK;
@@ -305,73 +338,91 @@ HicStatus HicControlCoordinator::initialize(const HicControlConfig& config)
 	HicStatus status = kinematicsAdapter_.initialize(config.robotType, config.jointCount, config.kinematicParams);
 	if (status != HIC_STATUS_OK)
 	{
-		lastStatus_ = status;
+	
+	lastStatus_ = status;
 #ifdef HIC_ENABLE_DEBUG_PRINT
-		std::fprintf(stderr,
+	
+	std::fprintf(stderr,
 			"[HicControlCoordinator::initialize] kinematicsAdapter.initialize failed status=%d\n",
 			static_cast<int>(status));
 #endif
-		return status;
+	
+	return status;
 	}
 
 	status = dynamicsAdapter_.initialize(config.robotType, config.jointCount, config.dynamicParams);
 	if (status != HIC_STATUS_OK)
 	{
-		lastStatus_ = status;
+	
+	lastStatus_ = status;
 #ifdef HIC_ENABLE_DEBUG_PRINT
-		std::fprintf(stderr,
+	
+	std::fprintf(stderr,
 			"[HicControlCoordinator::initialize] dynamicsAdapter.initialize failed status=%d\n",
 			static_cast<int>(status));
 #endif
-		return status;
+	
+	return status;
 	}
 
 	status = dynamicsAdapter_.setRobotKinematicParameters(config.kinematicParams);
 	if (status != HIC_STATUS_OK)
 	{
-		lastStatus_ = status;
+	
+	lastStatus_ = status;
 #ifdef HIC_ENABLE_DEBUG_PRINT
-		std::fprintf(stderr,
+	
+	std::fprintf(stderr,
 			"[HicControlCoordinator::initialize] dynamicsAdapter.setRobotKinematicParameters failed status=%d\n",
 			static_cast<int>(status));
 #endif
-		return status;
+	
+	return status;
 	}
 
 	status = impedanceCore_.initialize(config.jointCount, config.controlPeriod);
 	if (status != HIC_STATUS_OK)
 	{
-		lastStatus_ = status;
+	
+	lastStatus_ = status;
 #ifdef HIC_ENABLE_DEBUG_PRINT
-		std::fprintf(stderr,
+	
+	std::fprintf(stderr,
 			"[HicControlCoordinator::initialize] impedanceCore.initialize failed status=%d\n",
 			static_cast<int>(status));
 #endif
-		return status;
+	
+	return status;
 	}
 
 	status = jointImpedanceCore_.initialize(config.jointCount, config.controlPeriod);
 	if (status != HIC_STATUS_OK)
 	{
-		lastStatus_ = status;
+	
+	lastStatus_ = status;
 #ifdef HIC_ENABLE_DEBUG_PRINT
-		std::fprintf(stderr,
+	
+	std::fprintf(stderr,
 			"[HicControlCoordinator::initialize] jointImpedanceCore.initialize failed status=%d\n",
 			static_cast<int>(status));
 #endif
-		return status;
+	
+	return status;
 	}
 	jointImpedanceCore_.reset();
 	status = jointImpedanceCore_.setConfig(jointImpedanceConfig_);
 	if (status != HIC_STATUS_OK)
 	{
-		lastStatus_ = status;
+	
+	lastStatus_ = status;
 #ifdef HIC_ENABLE_DEBUG_PRINT
-		std::fprintf(stderr,
+	
+	std::fprintf(stderr,
 			"[HicControlCoordinator::initialize] jointImpedanceCore.setConfig failed status=%d\n",
 			static_cast<int>(status));
 #endif
-		return status;
+	
+	return status;
 	}
 
 	HicRobotStateObserverConfig stateConfig = {};
@@ -379,25 +430,31 @@ HicStatus HicControlCoordinator::initialize(const HicControlConfig& config)
 	status = robotStateObserver_.initialize(stateConfig);
 	if (status != HIC_STATUS_OK)
 	{
-		lastStatus_ = status;
+	
+	lastStatus_ = status;
 #ifdef HIC_ENABLE_DEBUG_PRINT
-		std::fprintf(stderr,
+	
+	std::fprintf(stderr,
 			"[HicControlCoordinator::initialize] robotStateObserver.initialize failed status=%d\n",
 			static_cast<int>(status));
 #endif
-		return status;
+	
+	return status;
 	}
 
 	status = forceObserver_.initialize(config.jointCount, config.controlPeriod);
 	if (status != HIC_STATUS_OK)
 	{
-		lastStatus_ = status;
+	
+	lastStatus_ = status;
 #ifdef HIC_ENABLE_DEBUG_PRINT
-		std::fprintf(stderr,
+	
+	std::fprintf(stderr,
 			"[HicControlCoordinator::initialize] forceObserver.initialize failed status=%d\n",
 			static_cast<int>(status));
 #endif
-		return status;
+	
+	return status;
 	}
 
 	initialized_ = true;
@@ -429,19 +486,28 @@ void HicControlCoordinator::buildDefaultStateObserverConfig(
 	stateConfig.jointCount = config_.jointCount;
 	stateConfig.controlPeriod = config_.controlPeriod;
 	stateConfig.enablePositionFilter = false;
-	stateConfig.enableVelocityFilter = false;
-	stateConfig.enableAccelerationFilter = false;
+	stateConfig.enableVelocityFilter = true;
+	stateConfig.enableAccelerationFilter = true;
 	stateConfig.enableMotorCurrentFilter = false;
-	stateConfig.enableMeasuredTorqueFilter = false;
+	stateConfig.enableMeasuredTorqueFilter_sensor = false;
 	stateConfig.enableCurrentToTorqueEstimate = true;
 
+	const double velocityFilterAlpha =
+		firstOrderAlphaFromTimeConstant(config_.controlPeriod, 0.02);
+	const double accelerationFilterAlpha =
+		firstOrderAlphaFromTimeConstant(config_.controlPeriod, 0.05);
 	for (int i = 0; i < HIC_MAX_JOINTS; ++i)
 	{
-		stateConfig.positionFilterAlpha[i] = 1.0;
-		stateConfig.velocityFilterAlpha[i] = 1.0;
-		stateConfig.accelerationFilterAlpha[i] = 1.0;
-		stateConfig.motorCurrentFilterAlpha[i] = 1.0;
-		stateConfig.measuredTorqueFilterAlpha[i] = 1.0;
+	
+	stateConfig.positionFilterAlpha[i] = 1.0;
+	
+	stateConfig.velocityFilterAlpha[i] = velocityFilterAlpha;
+	
+	stateConfig.accelerationFilterAlpha[i] = accelerationFilterAlpha;
+	
+	stateConfig.motorCurrentFilterAlpha[i] = 1.0;
+	
+	stateConfig.measuredTorqueFilterAlpha_sensor[i] = 1.0;
 
 		fillRangeFromBoundsOrSymmetric(
 			config_.lowerJointLimit[i],
@@ -475,13 +541,16 @@ void HicControlCoordinator::buildDefaultStateObserverConfig(
 			config_.lowerJointTorque[i],
 			config_.upperJointTorque[i],
 			config_.maxJointTorque[i],
-			&stateConfig.lowerMeasuredTorque[i],
-			&stateConfig.upperMeasuredTorque[i],
-			&stateConfig.maxAbsMeasuredTorque[i]);
+			&stateConfig.lowerMeasuredTorque_sensor[i],
+			&stateConfig.upperMeasuredTorque_sensor[i],
+			&stateConfig.maxAbsMeasuredTorque_sensor[i]);
 
-		stateConfig.torqueConstant[i] = config_.torqueConstant[i];
-		stateConfig.gearRatio[i] = config_.gearRatio[i];
-		stateConfig.transmissionEfficiency[i] = config_.transmissionEfficiency[i];
+	
+	stateConfig.torqueConstant[i] = config_.torqueConstant[i];
+	
+	stateConfig.gearRatio[i] = config_.gearRatio[i];
+	
+	stateConfig.transmissionEfficiency[i] = config_.transmissionEfficiency[i];
 	}
 }
 
@@ -490,80 +559,188 @@ HicStatus HicControlCoordinator::updateExternalTorqueEstimateFromRobotState()
 	// 该函数把“电流反推外力矩”链路接到交互力观测器：
 	// 1. robotStateObserver_ 提供滤波后的 q/dq 和由电机电流估算的关节力矩；
 	// 2. dynamicsAdapter_ 计算当前状态下的模型力矩；
-	// Comment split from executable statement.
+	// 3. 缓存 gravity/coriolis/friction/modelTorque，并更新 forceObserver_ 中的 externalTorque_current�?
 	if (!initialized_)
 	{
-		return HIC_STATUS_ERROR_INIT;
+	
+	return HIC_STATUS_ERROR_INIT;
 	}
 
 	double q[HIC_MAX_JOINTS] = { 0.0 };
 	double dq[HIC_MAX_JOINTS] = { 0.0 };
-	double motorEstimatedTorque[HIC_MAX_JOINTS] = { 0.0 };
-	// 第一步：读取观测器中滤波后的关节位置和速度。
+	double ddq[HIC_MAX_JOINTS] = { 0.0 };
+	double motorEstimatedTorque_current[HIC_MAX_JOINTS] = { 0.0 };
+	double jointMeasuredTorque_sensor[HIC_MAX_JOINTS] = { 0.0 };
+	// 第一步：读取观测器中滤波后的关节位置和速度�?
 	HicStatus status = robotStateObserver_.getFilteredJointPosition(q);
 	if (status != HIC_STATUS_OK)
 	{
-		return status;
+	
+	return status;
 	}
 	status = robotStateObserver_.getFilteredJointVelocity(dq);
 	if (status != HIC_STATUS_OK)
 	{
-		return status;
+	
+	return status;
 	}
-	status = robotStateObserver_.getMotorEstimatedTorque(motorEstimatedTorque);
+	status = robotStateObserver_.getFilteredJointAcceleration(ddq);
 	if (status != HIC_STATUS_OK)
 	{
-		return status;
+	
+	return status;
 	}
-	// Step 2: compute model torques to subtract from motor-estimated torque.
+	status = robotStateObserver_.getMotorEstimatedTorque_current(motorEstimatedTorque_current);
+	if (status != HIC_STATUS_OK)
+	{
+	
+	return status;
+	}
+	status = robotStateObserver_.getFilteredJointMeasuredTorque_sensor(jointMeasuredTorque_sensor);
+	if (status != HIC_STATUS_OK)
+	{
+	
+	return status;
+	}
+	// 第二步：计算要从电机估计力矩中扣除的动力学模型力矩分项�?
 	double gravityTorque[HIC_MAX_JOINTS] = { 0.0 };
 	double coriolisTorque[HIC_MAX_JOINTS] = { 0.0 };
 	double frictionTorque[HIC_MAX_JOINTS] = { 0.0 };
+	double modelTorque_current[HIC_MAX_JOINTS] = { 0.0 };
+	double modelTorque_sensor[HIC_MAX_JOINTS] = { 0.0 };
 
 	status = dynamicsAdapter_.computeGravityTorque(q, gravityTorque);
 	if (status != HIC_STATUS_OK)
 	{
-		return status;
+	
+	return status;
 	}
 
 	status = dynamicsAdapter_.computeCoriolisTorque(q, dq, coriolisTorque);
 	if (status != HIC_STATUS_OK && status != HIC_STATUS_ERROR_NOT_IMPLEMENTED)
 	{
-		return status;
+	
+	return status;
 	}
 
-	status = dynamicsAdapter_.computeFrictionTorque(dq, frictionTorque);
+	status = dynamicsAdapter_.computeFrictionTorque(q, dq, ddq, frictionTorque);
 	if (status != HIC_STATUS_OK && status != HIC_STATUS_ERROR_NOT_IMPLEMENTED)
 	{
-		return status;
+	
+	return status;
 	}
-	// Step 3: external torque estimate = motor estimate - model torque.
-	double jointExternalTorque[HIC_MAX_JOINTS] = { 0.0 };
+	status = dynamicsAdapter_.computeModelTorque_current(q, dq, ddq, modelTorque_current);
+	const bool hasModelTorque_current = (status == HIC_STATUS_OK);
+	if (!hasModelTorque_current && status != HIC_STATUS_ERROR_NOT_IMPLEMENTED)
+	{
+	
+	return status;
+	}
+	status = dynamicsAdapter_.computeModelTorque_sensor(q, dq, ddq, modelTorque_sensor);
+	const bool hasModelTorque_sensor = (status == HIC_STATUS_OK);
+	if (!hasModelTorque_sensor && status != HIC_STATUS_ERROR_NOT_IMPLEMENTED)
+	{
+	
+	return status;
+	}
+	// 第三步：分别计算 current/sensor 两条链路的外力矩估计，并缓存本周期动力学结果�?
+	double jointExternalTorque_current[HIC_MAX_JOINTS] = { 0.0 };
+	double jointExternalTorque_sensor[HIC_MAX_JOINTS] = { 0.0 };
+	std::memset(&lastEstimatedDynamicsTorques_, 0, sizeof(lastEstimatedDynamicsTorques_));
+	lastEstimatedDynamicsTorques_.terms.jointCount = config_.jointCount;
+	lastEstimatedDynamicsTorques_.terms_current.jointCount = config_.jointCount;
+	lastEstimatedDynamicsTorques_.terms_sensor.jointCount = config_.jointCount;
 	for (int i = 0; i < config_.jointCount; ++i)
 	{
-		const double modelTorque = gravityTorque[i] + coriolisTorque[i] + frictionTorque[i];
-		jointExternalTorque[i] = motorEstimatedTorque[i] - modelTorque;
+	
+	const double modelTorqueFallback = gravityTorque[i] + coriolisTorque[i] + frictionTorque[i];
+	if (!hasModelTorque_current)
+	{
+		modelTorque_current[i] = modelTorqueFallback;
+	}
+	if (!hasModelTorque_sensor)
+	{
+		modelTorque_sensor[i] = modelTorqueFallback;
+	}
+	
+	jointExternalTorque_current[i] = motorEstimatedTorque_current[i] - modelTorque_current[i];
+	jointExternalTorque_sensor[i] = jointMeasuredTorque_sensor[i] - modelTorque_sensor[i];
+		lastEstimatedDynamicsTorques_.terms.gravityTorque[i] = gravityTorque[i];
+		lastEstimatedDynamicsTorques_.terms.coriolisTorque[i] = coriolisTorque[i];
+		lastEstimatedDynamicsTorques_.terms.frictionTorque[i] = frictionTorque[i];
+		lastEstimatedDynamicsTorques_.terms.modelTorque[i] = modelTorque_current[i];
+		lastEstimatedDynamicsTorques_.terms_current.gravityTorque[i] = gravityTorque[i];
+		lastEstimatedDynamicsTorques_.terms_current.coriolisTorque[i] = coriolisTorque[i];
+		lastEstimatedDynamicsTorques_.terms_current.frictionTorque[i] = frictionTorque[i];
+		lastEstimatedDynamicsTorques_.terms_current.modelTorque[i] = modelTorque_current[i];
+		lastEstimatedDynamicsTorques_.terms_sensor.gravityTorque[i] = gravityTorque[i];
+		lastEstimatedDynamicsTorques_.terms_sensor.coriolisTorque[i] = coriolisTorque[i];
+		lastEstimatedDynamicsTorques_.terms_sensor.frictionTorque[i] = frictionTorque[i];
+		lastEstimatedDynamicsTorques_.terms_sensor.modelTorque[i] = modelTorque_sensor[i];
+		lastEstimatedDynamicsTorques_.externalTorque_current[i] = jointExternalTorque_current[i];
+		lastEstimatedDynamicsTorques_.externalTorque_sensor[i] = jointExternalTorque_sensor[i];
 	}
 
-	// Comment split from executable statement.
+#ifdef HIC_ENABLE_DEBUG_PRINT
+	static int debug_dynamics_torque_count = 0;
+	if ((debug_dynamics_torque_count++ % 1000) == 0)
+	{
+	
+	std::fprintf(stderr,
+			"[HicControlCoordinator::updateExternalTorqueEstimateFromRobotState] jointCount=%d\n",
+			config_.jointCount);
+	
+	for (int i = 0; i < config_.jointCount; ++i)
+		{
+		
+	std::fprintf(stderr,
+				"  joint[%d] motor=%.6f gravity=%.6f coriolis=%.6f friction=%.6f model=%.6f external=%.6f\n",
+				i,
+			
+	motorEstimatedTorque_current[i],
+				gravityTorque[i],
+				coriolisTorque[i],
+				frictionTorque[i],
+				lastEstimatedDynamicsTorques_.terms_current.modelTorque[i],
+				lastEstimatedDynamicsTorques_.externalTorque_current[i]);
+		}
+	
+	std::fflush(stderr);
+	}
+#endif
 
-	return forceObserver_.updateJointExternalTorque(jointExternalTorque);
+	status = robotStateObserver_.updateModelTorqueEstimate(lastEstimatedDynamicsTorques_);
+	if (status != HIC_STATUS_OK)
+	{
+	
+	return status;
+	}
+
+	status = forceObserver_.updateJointExternalTorque_current(jointExternalTorque_current);
+	if (status != HIC_STATUS_OK)
+	{
+	
+	return status;
+	}
+	return forceObserver_.updateJointExternalTorque_sensor(jointExternalTorque_sensor);
 }
 
 HicStatus HicControlCoordinator::rebuildStateObserverConfig()
 {
-	// Comment split from executable statement.
 	if (!initialized_)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INIT;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INIT;
+	
+	return lastStatus_;
 	}
 
 	HicRobotStateObserverConfig stateConfig = {};
 	lastStatus_ = robotStateObserver_.getConfig(stateConfig);
 	if (lastStatus_ != HIC_STATUS_OK)
 	{
-		return lastStatus_;
+	
+	return lastStatus_;
 	}
 
 	stateConfig.jointCount = config_.jointCount;
@@ -588,12 +765,15 @@ HicStatus HicControlCoordinator::rebuildStateObserverConfig()
 			config_.lowerJointTorque[i],
 			config_.upperJointTorque[i],
 			config_.maxJointTorque[i],
-			&stateConfig.lowerMeasuredTorque[i],
-			&stateConfig.upperMeasuredTorque[i],
-			&stateConfig.maxAbsMeasuredTorque[i]);
-		stateConfig.torqueConstant[i] = config_.torqueConstant[i];
-		stateConfig.gearRatio[i] = config_.gearRatio[i];
-		stateConfig.transmissionEfficiency[i] = config_.transmissionEfficiency[i];
+			&stateConfig.lowerMeasuredTorque_sensor[i],
+			&stateConfig.upperMeasuredTorque_sensor[i],
+			&stateConfig.maxAbsMeasuredTorque_sensor[i]);
+	
+	stateConfig.torqueConstant[i] = config_.torqueConstant[i];
+	
+	stateConfig.gearRatio[i] = config_.gearRatio[i];
+	
+	stateConfig.transmissionEfficiency[i] = config_.transmissionEfficiency[i];
 	}
 	lastStatus_ = robotStateObserver_.setConfig(stateConfig);
 	return lastStatus_;
@@ -612,7 +792,8 @@ HicStatus HicControlCoordinator::updateRobotState(
 	const bool should_debug_print = ((debug_update_state_count++ % 1000) == 0);
 	if (should_debug_print)
 	{
-		std::fprintf(stderr,
+	
+	std::fprintf(stderr,
 			"[HicControlCoordinator::updateRobotState] entered, initialized=%d jointCount=%d t=%.6f\n",
 			initialized_ ? 1 : 0,
 			config_.jointCount,
@@ -621,16 +802,20 @@ HicStatus HicControlCoordinator::updateRobotState(
 #endif
 	if (!initialized_)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INIT;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INIT;
 #ifdef HIC_ENABLE_DEBUG_PRINT
-		if (should_debug_print)
+	
+	if (should_debug_print)
 		{
-			std::fprintf(stderr,
+		
+	std::fprintf(stderr,
 				"[HicControlCoordinator::updateRobotState] return status=%d before observer\n",
 				static_cast<int>(lastStatus_));
 		}
 #endif
-		return lastStatus_;
+	
+	return lastStatus_;
 	}
 
 	const HicStatus status = robotStateObserver_.updateRobotState(
@@ -638,32 +823,38 @@ HicStatus HicControlCoordinator::updateRobotState(
 #ifdef HIC_ENABLE_DEBUG_PRINT
 	if (should_debug_print)
 	{
-		std::fprintf(stderr,
+	
+	std::fprintf(stderr,
 			"[HicControlCoordinator::updateRobotState] robotStateObserver.updateRobotState status=%d\n",
 			static_cast<int>(status));
 	}
 #endif
 	if (status == HIC_STATUS_OK)
 	{
+		currentTime_ = currentTime;
 		// Refresh external torque estimate after a successful state update.
-		const HicStatus externalTorqueStatus = updateExternalTorqueEstimateFromRobotState();
+	
+	const HicStatus externalTorque_currentStatus = updateExternalTorqueEstimateFromRobotState();
 #ifdef HIC_ENABLE_DEBUG_PRINT
-		if (should_debug_print)
+	
+	if (should_debug_print)
 		{
-			std::fprintf(stderr,
+		
+	std::fprintf(stderr,
 				"[HicControlCoordinator::updateRobotState] updateExternalTorqueEstimateFromRobotState status=%d\n",
-				static_cast<int>(externalTorqueStatus));
+				static_cast<int>(externalTorque_currentStatus));
 		}
 #endif
-		if (externalTorqueStatus != HIC_STATUS_OK)
+	
+	if (externalTorque_currentStatus != HIC_STATUS_OK)
 		{
-			lastStatus_ = externalTorqueStatus;
-			return lastStatus_;
+		
+	lastStatus_ = externalTorque_currentStatus;
+		
+	return lastStatus_;
 		}
 
-		// 外力矩估计来自 motorEstimatedTorque - dynamicsModelTorque，可用于阻抗外力补偿。
-
-		currentTime_ = currentTime;
+		// 外力矩估计来�?motorEstimatedTorque_current - dynamicsModelTorque，可用于阻抗外力补偿�?
 		invalidateCommandCache();
 	}
 	lastStatus_ = status;
@@ -677,8 +868,10 @@ HicStatus HicControlCoordinator::updateJointState(
 {
 	if (!initialized_)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INIT;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INIT;
+	
+	return lastStatus_;
 	}
 
 	const HicStatus status = robotStateObserver_.updateJointState(
@@ -692,15 +885,17 @@ HicStatus HicControlCoordinator::updateJointState(
 	return status;
 }
 
-HicStatus HicControlCoordinator::updateJointMeasuredTorque(const double* jointMeasuredTorque)
+HicStatus HicControlCoordinator::updateJointMeasuredTorque_sensor(const double* jointMeasuredTorque_sensor)
 {
 	if (!initialized_)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INIT;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INIT;
+	
+	return lastStatus_;
 	}
 
-	const HicStatus status = robotStateObserver_.updateJointMeasuredTorque(jointMeasuredTorque);
+	const HicStatus status = robotStateObserver_.updateJointMeasuredTorque_sensor(jointMeasuredTorque_sensor);
 	if (status == HIC_STATUS_OK)
 	{
 		invalidateCommandCache();
@@ -740,8 +935,10 @@ HicStatus HicControlCoordinator::startForceControlZeroForceMode()
 	// ZeroForceMode 的入口尽量保守：
 	if (!initialized_)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INIT;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INIT;
+	
+	return lastStatus_;
 	}
 
 	HicRobotState state = {};
@@ -753,8 +950,10 @@ HicStatus HicControlCoordinator::startForceControlZeroForceMode()
 			controlMode_ = HIC_CONTROL_MODE_IDLE;
 			forceControlMode_ = HIC_FORCE_CONTROL_MODE_NONE;
 			zeroForceStopRequested_ = false;
-			lastStatus_ = status;
-			return lastStatus_;
+		
+	lastStatus_ = status;
+		
+	return lastStatus_;
 		}
 
 	controlMode_ = HIC_CONTROL_MODE_FORCE_CONTROL;
@@ -776,13 +975,17 @@ HicStatus HicControlCoordinator::prepareStopForceControlMode()
 	// 真正退出发生在 computeZeroForceCurrentCommand() 里，
 	if (!initialized_)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INIT;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INIT;
+	
+	return lastStatus_;
 	}
 	if (controlMode_ != HIC_CONTROL_MODE_FORCE_CONTROL)
 	{
-		lastStatus_ = HIC_STATUS_OK;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_OK;
+	
+	return lastStatus_;
 	}
 
 	if (forceControlMode_ != HIC_FORCE_CONTROL_MODE_ZERO_FORCE)
@@ -790,8 +993,10 @@ HicStatus HicControlCoordinator::prepareStopForceControlMode()
 		controlMode_ = HIC_CONTROL_MODE_IDLE;
 		forceControlMode_ = HIC_FORCE_CONTROL_MODE_NONE;
 		invalidateCommandCache();
-		lastStatus_ = HIC_STATUS_OK;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_OK;
+	
+	return lastStatus_;
 	}
 
 	zeroForceStopRequested_ = true;
@@ -804,13 +1009,16 @@ HicStatus HicControlCoordinator::startForceControlCartesianFixedPositionMode()
 {
 	if (!initialized_)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INIT;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INIT;
+	
+	return lastStatus_;
 	}
 	lastStatus_ = impedanceCore_.setForceControlMode(HIC_FORCE_CONTROL_MODE_CARTESIAN_FIXED_POSITION);
 	if (lastStatus_ != HIC_STATUS_OK)
 	{
-		return lastStatus_;
+	
+	return lastStatus_;
 	}
 	controlMode_ = HIC_CONTROL_MODE_FORCE_CONTROL;
 	forceControlMode_ = HIC_FORCE_CONTROL_MODE_CARTESIAN_FIXED_POSITION;
@@ -823,13 +1031,16 @@ HicStatus HicControlCoordinator::startForceControlCartesianFixedPoseMode()
 {
 	if (!initialized_)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INIT;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INIT;
+	
+	return lastStatus_;
 	}
 	lastStatus_ = impedanceCore_.setForceControlMode(HIC_FORCE_CONTROL_MODE_CARTESIAN_FIXED_POSE);
 	if (lastStatus_ != HIC_STATUS_OK)
 	{
-		return lastStatus_;
+	
+	return lastStatus_;
 	}
 	controlMode_ = HIC_CONTROL_MODE_FORCE_CONTROL;
 	forceControlMode_ = HIC_FORCE_CONTROL_MODE_CARTESIAN_FIXED_POSE;
@@ -842,13 +1053,16 @@ HicStatus HicControlCoordinator::startForceControlCartesianTrajectoryMode()
 {
 	if (!initialized_)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INIT;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INIT;
+	
+	return lastStatus_;
 	}
 	lastStatus_ = impedanceCore_.setForceControlMode(HIC_FORCE_CONTROL_MODE_CARTESIAN_TRAJECTORY);
 	if (lastStatus_ != HIC_STATUS_OK)
 	{
-		return lastStatus_;
+	
+	return lastStatus_;
 	}
 	controlMode_ = HIC_CONTROL_MODE_FORCE_CONTROL;
 	forceControlMode_ = HIC_FORCE_CONTROL_MODE_CARTESIAN_TRAJECTORY;
@@ -861,8 +1075,10 @@ HicStatus HicControlCoordinator::startForceControlJointImpedanceMode()
 {
 	if (!initialized_)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INIT;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INIT;
+	
+	return lastStatus_;
 	}
 
 	controlMode_ = HIC_CONTROL_MODE_FORCE_CONTROL;
@@ -899,20 +1115,47 @@ HicStatus HicControlCoordinator::setNullspaceConfig(const HicNullspaceControlCon
 	return status;
 }
 
+HicStatus HicControlCoordinator::setNullspaceParameters(
+	const double* targetJointPosition,
+	const double* stiffness,
+	const double* damping)
+{
+	if (!targetJointPosition || !stiffness || !damping)
+	{
+	
+	lastStatus_ = HIC_STATUS_ERROR_NULL_POINTER;
+	
+	return lastStatus_;
+	}
+
+	HicNullspaceControlConfig config = nullspaceConfig_;
+	for (int i = 0; i < config_.jointCount; ++i)
+	{
+		config.targetJointPosition[i] = targetJointPosition[i];
+		config.stiffness[i] = stiffness[i];
+		config.damping[i] = damping[i];
+	}
+	return setNullspaceConfig(config);
+}
+
 HicStatus HicControlCoordinator::captureCurrentJointPositionAsNullspaceTarget()
 {
 	if (!initialized_)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INIT;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INIT;
+	
+	return lastStatus_;
 	}
 
 	HicRobotState state = {};
 	HicStatus status = robotStateObserver_.getRobotState(state);
 	if (status != HIC_STATUS_OK)
 	{
-		lastStatus_ = status;
-		return status;
+	
+	lastStatus_ = status;
+	
+	return status;
 	}
 
 	status = impedanceCore_.captureCurrentJointPositionAsNullspaceTarget(state.jointPosition);
@@ -926,6 +1169,13 @@ HicStatus HicControlCoordinator::captureCurrentJointPositionAsNullspaceTarget()
 
 HicStatus HicControlCoordinator::setJointImpedanceConfig(const HicJointImpedanceConfig& config)
 {
+	if (config.externalTorqueSource != HIC_EXTERNAL_TORQUE_SOURCE_CURRENT &&
+		config.externalTorqueSource != HIC_EXTERNAL_TORQUE_SOURCE_SENSOR)
+	{
+		lastStatus_ = HIC_STATUS_ERROR_INVALID_PARAM;
+		return lastStatus_;
+	}
+
 	jointImpedanceConfig_ = config;
 	const HicStatus status = jointImpedanceCore_.setConfig(config);
 	if (status == HIC_STATUS_OK)
@@ -936,26 +1186,109 @@ HicStatus HicControlCoordinator::setJointImpedanceConfig(const HicJointImpedance
 	return status;
 }
 
+HicStatus HicControlCoordinator::setSingleJointImpedanceConfig(
+	int jointIndex,
+	double stiffness,
+	double damping,
+	double targetPosition,
+	double targetVelocity,
+	double targetAcceleration,
+	bool enableExternalTorqueCompensation,
+	int externalTorqueSource)
+{
+	if (!initialized_)
+	{
+	
+	lastStatus_ = HIC_STATUS_ERROR_INIT;
+	
+	return lastStatus_;
+	}
+	if (jointIndex < 0 || jointIndex >= config_.jointCount)
+	{
+	
+	lastStatus_ = HIC_STATUS_ERROR_INVALID_PARAM;
+	
+	return lastStatus_;
+	}
+	if (!std::isfinite(stiffness) ||
+		!std::isfinite(damping) ||
+		!std::isfinite(targetPosition) ||
+		!std::isfinite(targetVelocity) ||
+		!std::isfinite(targetAcceleration))
+	{
+	
+	lastStatus_ = HIC_STATUS_ERROR_INVALID_PARAM;
+	
+	return lastStatus_;
+	}
+	if (externalTorqueSource != HIC_EXTERNAL_TORQUE_SOURCE_CURRENT &&
+		externalTorqueSource != HIC_EXTERNAL_TORQUE_SOURCE_SENSOR)
+	{
+	
+	lastStatus_ = HIC_STATUS_ERROR_INVALID_PARAM;
+	
+	return lastStatus_;
+	}
+
+	HicJointImpedanceConfig config = jointImpedanceConfig_;
+	config.stiffness[jointIndex] = stiffness;
+	config.damping[jointIndex] = damping;
+	config.targetPosition[jointIndex] = targetPosition;
+	config.targetVelocity[jointIndex] = targetVelocity;
+	config.targetAcceleration[jointIndex] = targetAcceleration;
+	config.enableExternalTorqueCompensation = enableExternalTorqueCompensation;
+	config.externalTorqueSource = externalTorqueSource;
+	return setJointImpedanceConfig(config);
+}
+
+HicStatus HicControlCoordinator::setJointImpedanceParameters(
+	const double* stiffness,
+	const double* damping,
+	bool enableExternalTorqueCompensation)
+{
+	if (!stiffness || !damping)
+	{
+	
+	lastStatus_ = HIC_STATUS_ERROR_NULL_POINTER;
+	
+	return lastStatus_;
+	}
+
+	HicJointImpedanceConfig config = jointImpedanceConfig_;
+	for (int i = 0; i < config_.jointCount; ++i)
+	{
+		config.stiffness[i] = stiffness[i];
+		config.damping[i] = damping[i];
+	}
+	config.enableExternalTorqueCompensation = enableExternalTorqueCompensation;
+	return setJointImpedanceConfig(config);
+}
+
 HicStatus HicControlCoordinator::captureCurrentJointPositionAsImpedanceTarget()
 {
 	if (!initialized_)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INIT;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INIT;
+	
+	return lastStatus_;
 	}
 
 	double jointPosition[HIC_MAX_JOINTS] = { 0.0 };
 	HicStatus status = robotStateObserver_.getFilteredJointPosition(jointPosition);
 	if (status != HIC_STATUS_OK)
 	{
-		lastStatus_ = status;
-		return status;
+	
+	lastStatus_ = status;
+	
+	return status;
 	}
 
 	status = jointImpedanceCore_.captureTargetPosition(jointPosition);
 	if (status == HIC_STATUS_OK)
 	{
-		for (int i = 0; i < config_.jointCount; ++i)
+	
+	for (int i = 0; i < config_.jointCount; ++i)
 		{
 			jointImpedanceConfig_.targetPosition[i] = jointPosition[i];
 		}
@@ -970,8 +1303,10 @@ HicStatus HicControlCoordinator::setFixedTargetPosition(const double targetPosit
 	HicStatus status = impedanceCore_.setForceControlMode(HIC_FORCE_CONTROL_MODE_CARTESIAN_FIXED_POSITION);
 	if (status != HIC_STATUS_OK)
 	{
-		lastStatus_ = status;
-		return status;
+	
+	lastStatus_ = status;
+	
+	return status;
 	}
 
 	status = impedanceCore_.setFixedTargetPosition(targetPosition);
@@ -988,8 +1323,10 @@ HicStatus HicControlCoordinator::setFixedTargetPose(const double targetPose[HIC_
 	HicStatus status = impedanceCore_.setForceControlMode(HIC_FORCE_CONTROL_MODE_CARTESIAN_FIXED_POSE);
 	if (status != HIC_STATUS_OK)
 	{
-		lastStatus_ = status;
-		return status;
+	
+	lastStatus_ = status;
+	
+	return status;
 	}
 
 	status = impedanceCore_.setFixedTargetPose(targetPose);
@@ -1008,8 +1345,10 @@ HicStatus HicControlCoordinator::captureCurrentPositionAsFixedTarget()
 	HicStatus status = getCurrentCartesianState(currentPose, currentTwist);
 	if (status != HIC_STATUS_OK)
 	{
-		lastStatus_ = status;
-		return status;
+	
+	lastStatus_ = status;
+	
+	return status;
 	}
 
 	status = setFixedTargetPosition(currentPose);
@@ -1024,8 +1363,10 @@ HicStatus HicControlCoordinator::captureCurrentPoseAsFixedTarget()
 	HicStatus status = getCurrentCartesianState(currentPose, currentTwist);
 	if (status != HIC_STATUS_OK)
 	{
-		lastStatus_ = status;
-		return status;
+	
+	lastStatus_ = status;
+	
+	return status;
 	}
 
 	status = setFixedTargetPose(currentPose);
@@ -1040,8 +1381,10 @@ HicStatus HicControlCoordinator::setOnlineTargetPose(
 	HicStatus status = impedanceCore_.setForceControlMode(HIC_FORCE_CONTROL_MODE_CARTESIAN_TRAJECTORY);
 	if (status != HIC_STATUS_OK)
 	{
-		lastStatus_ = status;
-		return status;
+	
+	lastStatus_ = status;
+	
+	return status;
 	}
 
 	status = impedanceCore_.setOnlineTargetPose(targetPose, targetVelocity);
@@ -1057,6 +1400,32 @@ HicStatus HicControlCoordinator::setDynamicsLinearParameters(const double* dynam
 {
 	if (!initialized_)
 	{
+	
+	lastStatus_ = HIC_STATUS_ERROR_INIT;
+	
+	return lastStatus_;
+	}
+	if (!dynamicParams)
+	{
+	
+	lastStatus_ = HIC_STATUS_ERROR_NULL_POINTER;
+	
+	return lastStatus_;
+	}
+
+	std::memcpy(config_.dynamicParams, dynamicParams, sizeof(config_.dynamicParams));
+	lastStatus_ = dynamicsAdapter_.setDynamicParameters(config_.dynamicParams);
+	if (lastStatus_ == HIC_STATUS_OK)
+	{
+		invalidateCommandCache();
+	}
+	return lastStatus_;
+}
+
+HicStatus HicControlCoordinator::setDynamicsLinearParameters_current(const double* dynamicParams)
+{
+	if (!initialized_)
+	{
 		lastStatus_ = HIC_STATUS_ERROR_INIT;
 		return lastStatus_;
 	}
@@ -1066,8 +1435,29 @@ HicStatus HicControlCoordinator::setDynamicsLinearParameters(const double* dynam
 		return lastStatus_;
 	}
 
-	std::memcpy(config_.dynamicParams, dynamicParams, sizeof(config_.dynamicParams));
-	lastStatus_ = dynamicsAdapter_.setDynamicParameters(config_.dynamicParams);
+	lastStatus_ = dynamicsAdapter_.setDynamicParameters_current(dynamicParams);
+	if (lastStatus_ == HIC_STATUS_OK)
+	{
+		std::memcpy(config_.dynamicParams, dynamicParams, sizeof(config_.dynamicParams));
+		invalidateCommandCache();
+	}
+	return lastStatus_;
+}
+
+HicStatus HicControlCoordinator::setDynamicsLinearParameters_sensor(const double* dynamicParams)
+{
+	if (!initialized_)
+	{
+		lastStatus_ = HIC_STATUS_ERROR_INIT;
+		return lastStatus_;
+	}
+	if (!dynamicParams)
+	{
+		lastStatus_ = HIC_STATUS_ERROR_NULL_POINTER;
+		return lastStatus_;
+	}
+
+	lastStatus_ = dynamicsAdapter_.setDynamicParameters_sensor(dynamicParams);
 	if (lastStatus_ == HIC_STATUS_OK)
 	{
 		invalidateCommandCache();
@@ -1081,13 +1471,17 @@ HicStatus HicControlCoordinator::setPayloadMassProperties(
 {
 	if (!initialized_)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INIT;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INIT;
+	
+	return lastStatus_;
 	}
 	if (!centerOfMass || mass < 0.0)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INVALID_PARAM;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INVALID_PARAM;
+	
+	return lastStatus_;
 	}
 
 	lastStatus_ = dynamicsAdapter_.setPayloadMassProperties(mass, centerOfMass);
@@ -1102,8 +1496,10 @@ HicStatus HicControlCoordinator::setGravityVector(double gx, double gy, double g
 {
 	if (!initialized_)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INIT;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INIT;
+	
+	return lastStatus_;
 	}
 
 	lastStatus_ = dynamicsAdapter_.setGravityVector(gx, gy, gz);
@@ -1121,45 +1517,58 @@ HicStatus HicControlCoordinator::setMotorTorqueConversionParameters(
 {
 	if (!initialized_)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INIT;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INIT;
+	
+	return lastStatus_;
 	}
 	if (!torqueConstant || !gearRatio || !transmissionEfficiency)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_NULL_POINTER;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_NULL_POINTER;
+	
+	return lastStatus_;
 	}
 
 	for (int i = 0; i < config_.jointCount; ++i)
 	{
-		double kt = torqueConstant[i];
-		double ratio = gearRatio[i];
-		double efficiency = transmissionEfficiency[i];
+	
+	double kt = torqueConstant[i];
+	
+	double ratio = gearRatio[i];
+	
+	double efficiency = transmissionEfficiency[i];
 #ifdef HIC_ALLOW_DEBUG_PARAM_VALIDATION_BYPASS
-		if (!std::isfinite(kt) || kt <= 0.0)
+	
+	if (!std::isfinite(kt) || kt <= 0.0)
 		{
 #ifdef HIC_ENABLE_DEBUG_PRINT
-			std::fprintf(stderr,
+		
+	std::fprintf(stderr,
 				"[HicControlCoordinator::setMotorTorqueConversionParameters] WARNING debug bypass torqueConstant joint=%d input=%.6f use=1.0\n",
 				i,
 				torqueConstant[i]);
 #endif
 			kt = 1.0;
 		}
-		if (!std::isfinite(ratio) || ratio <= 0.0)
+	
+	if (!std::isfinite(ratio) || ratio <= 0.0)
 		{
 #ifdef HIC_ENABLE_DEBUG_PRINT
-			std::fprintf(stderr,
+		
+	std::fprintf(stderr,
 				"[HicControlCoordinator::setMotorTorqueConversionParameters] WARNING debug bypass gearRatio joint=%d input=%.6f use=1.0\n",
 				i,
 				gearRatio[i]);
 #endif
 			ratio = 1.0;
 		}
-		if (!std::isfinite(efficiency) || efficiency <= 0.0)
+	
+	if (!std::isfinite(efficiency) || efficiency <= 0.0)
 		{
 #ifdef HIC_ENABLE_DEBUG_PRINT
-			std::fprintf(stderr,
+		
+	std::fprintf(stderr,
 				"[HicControlCoordinator::setMotorTorqueConversionParameters] WARNING debug bypass transmissionEfficiency joint=%d input=%.6f use=1.0\n",
 				i,
 				transmissionEfficiency[i]);
@@ -1167,11 +1576,14 @@ HicStatus HicControlCoordinator::setMotorTorqueConversionParameters(
 			efficiency = 1.0;
 		}
 #else
-		if (!std::isfinite(kt) || !std::isfinite(ratio) || !std::isfinite(efficiency) ||
+	
+	if (!std::isfinite(kt) || !std::isfinite(ratio) || !std::isfinite(efficiency) ||
 			kt <= 0.0 || ratio <= 0.0 || efficiency <= 0.0)
 		{
-			lastStatus_ = HIC_STATUS_ERROR_INVALID_PARAM;
-			return lastStatus_;
+		
+	lastStatus_ = HIC_STATUS_ERROR_INVALID_PARAM;
+		
+	return lastStatus_;
 		}
 #endif
 		config_.torqueConstant[i] = kt;
@@ -1192,13 +1604,17 @@ HicStatus HicControlCoordinator::setJointPositionLimits(
 {
 	if (!initialized_)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INIT;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INIT;
+	
+	return lastStatus_;
 	}
 	if (!lowerLimits || !upperLimits)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_NULL_POINTER;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_NULL_POINTER;
+	
+	return lastStatus_;
 	}
 
 	for (int i = 0; i < config_.jointCount; ++i)
@@ -1216,13 +1632,17 @@ HicStatus HicControlCoordinator::setJointVelocityLimits(
 {
 	if (!initialized_)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INIT;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INIT;
+	
+	return lastStatus_;
 	}
 	if (!lowerLimits || !upperLimits)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_NULL_POINTER;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_NULL_POINTER;
+	
+	return lastStatus_;
 	}
 
 	for (int i = 0; i < config_.jointCount; ++i)
@@ -1240,13 +1660,17 @@ HicStatus HicControlCoordinator::setJointAccelerationLimits(
 {
 	if (!initialized_)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INIT;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INIT;
+	
+	return lastStatus_;
 	}
 	if (!lowerLimits || !upperLimits)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_NULL_POINTER;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_NULL_POINTER;
+	
+	return lastStatus_;
 	}
 
 	for (int i = 0; i < config_.jointCount; ++i)
@@ -1264,13 +1688,17 @@ HicStatus HicControlCoordinator::setJointTorqueLimits(
 {
 	if (!initialized_)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INIT;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INIT;
+	
+	return lastStatus_;
 	}
 	if (!lowerLimits || !upperLimits)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_NULL_POINTER;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_NULL_POINTER;
+	
+	return lastStatus_;
 	}
 
 	for (int i = 0; i < config_.jointCount; ++i)
@@ -1289,31 +1717,40 @@ HicStatus HicControlCoordinator::setMotorCurrentLimits(
 {
 	if (!initialized_)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INIT;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INIT;
+	
+	return lastStatus_;
 	}
 	if (!lowerLimits || !upperLimits)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_NULL_POINTER;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_NULL_POINTER;
+	
+	return lastStatus_;
 	}
 
 	constexpr double kDebugDefaultMotorCurrentLimit = 1000.0;
 	for (int i = 0; i < config_.jointCount; ++i)
 	{
-		double lower = lowerLimits[i];
-		double upper = upperLimits[i];
+	
+	double lower = lowerLimits[i];
+	
+	double upper = upperLimits[i];
 
 #ifdef HIC_ALLOW_DEBUG_PARAM_VALIDATION_BYPASS
-		const bool invalidLimit =
+	
+	const bool invalidLimit =
 			!std::isfinite(lower) ||
 			!std::isfinite(upper) ||
 			lower > upper ||
 			(lower == 0.0 && upper == 0.0);
-		if (invalidLimit)
+	
+	if (invalidLimit)
 		{
 #ifdef HIC_ENABLE_DEBUG_PRINT
-			std::fprintf(stderr,
+		
+	std::fprintf(stderr,
 				"[HicControlCoordinator::setMotorCurrentLimits] WARNING debug bypass invalid current limit joint=%d input=[%.6f, %.6f], use=[%.6f, %.6f]\n",
 				i,
 				lowerLimits[i],
@@ -1325,10 +1762,13 @@ HicStatus HicControlCoordinator::setMotorCurrentLimits(
 			upper = kDebugDefaultMotorCurrentLimit;
 		}
 #else
-		if (!std::isfinite(lower) || !std::isfinite(upper) || lower > upper)
+	
+	if (!std::isfinite(lower) || !std::isfinite(upper) || lower > upper)
 		{
-			lastStatus_ = HIC_STATUS_ERROR_INVALID_PARAM;
-			return lastStatus_;
+		
+	lastStatus_ = HIC_STATUS_ERROR_INVALID_PARAM;
+		
+	return lastStatus_;
 		}
 #endif
 
@@ -1339,15 +1779,17 @@ HicStatus HicControlCoordinator::setMotorCurrentLimits(
 	lastStatus_ = rebuildStateObserverConfig();
 	return lastStatus_;
 }
-HicStatus HicControlCoordinator::updateJointExternalTorque(const double* jointExternalTorque)
+HicStatus HicControlCoordinator::updateJointExternalTorque_current(const double* jointExternalTorque_current)
 {
 	if (!initialized_)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INIT;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INIT;
+	
+	return lastStatus_;
 	}
 
-	const HicStatus status = forceObserver_.updateJointExternalTorque(jointExternalTorque);
+	const HicStatus status = forceObserver_.updateJointExternalTorque_current(jointExternalTorque_current);
 	if (status == HIC_STATUS_OK)
 	{
 		invalidateCommandCache();
@@ -1360,8 +1802,10 @@ HicStatus HicControlCoordinator::setRobotStateObserverConfig(const HicRobotState
 {
 	if (!initialized_)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INIT;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INIT;
+	
+	return lastStatus_;
 	}
 
 	const HicStatus status = robotStateObserver_.setConfig(config);
@@ -1377,7 +1821,8 @@ HicStatus HicControlCoordinator::getRobotStateObserverConfig(HicRobotStateObserv
 {
 	if (!initialized_)
 	{
-		return HIC_STATUS_ERROR_INIT;
+	
+	return HIC_STATUS_ERROR_INIT;
 	}
 	return robotStateObserver_.getConfig(configOut);
 }
@@ -1386,8 +1831,10 @@ HicStatus HicControlCoordinator::setTorqueSensorConfig(const HicTorqueSensorConf
 {
 	if (!initialized_)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INIT;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INIT;
+	
+	return lastStatus_;
 	}
 
 	const HicStatus status = forceObserver_.setTorqueSensorConfig(config);
@@ -1403,7 +1850,8 @@ HicStatus HicControlCoordinator::getTorqueSensorConfig(HicTorqueSensorConfig& co
 {
 	if (!initialized_)
 	{
-		return HIC_STATUS_ERROR_INIT;
+	
+	return HIC_STATUS_ERROR_INIT;
 	}
 	return forceObserver_.getTorqueSensorConfig(configOut);
 }
@@ -1412,8 +1860,10 @@ HicStatus HicControlCoordinator::loadTorqueSensorConfigFromFile(const char* file
 {
 	if (!initialized_)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INIT;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INIT;
+	
+	return lastStatus_;
 	}
 
 	lastStatus_ = forceObserver_.loadTorqueSensorConfigFromFile(filePath);
@@ -1424,11 +1874,22 @@ HicStatus HicControlCoordinator::updateRawJointTorqueSensor(const double* rawTor
 {
 	if (!initialized_)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INIT;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INIT;
+	
+	return lastStatus_;
 	}
 
-	const HicStatus status = forceObserver_.updateRawJointTorqueSensor(rawTorqueByHardwareChannel);
+	HicStatus status = forceObserver_.updateRawJointTorqueSensor(rawTorqueByHardwareChannel);
+	if (status == HIC_STATUS_OK)
+	{
+		double filteredJointTorqueSensor[HIC_MAX_JOINTS] = { 0.0 };
+		status = forceObserver_.getFilteredJointTorqueSensor(filteredJointTorqueSensor);
+		if (status == HIC_STATUS_OK)
+		{
+			status = robotStateObserver_.updateJointMeasuredTorque_sensor(filteredJointTorqueSensor);
+		}
+	}
 	if (status == HIC_STATUS_OK)
 	{
 		invalidateCommandCache();
@@ -1441,7 +1902,8 @@ HicStatus HicControlCoordinator::getCalibratedJointTorqueSensor(double* calibrat
 {
 	if (!initialized_)
 	{
-		return HIC_STATUS_ERROR_INIT;
+	
+	return HIC_STATUS_ERROR_INIT;
 	}
 	return forceObserver_.getCalibratedJointTorqueSensor(calibratedJointTorque);
 }
@@ -1450,7 +1912,8 @@ HicStatus HicControlCoordinator::getTorqueSensorFaultStatus(bool* faultStatus) c
 {
 	if (!initialized_)
 	{
-		return HIC_STATUS_ERROR_INIT;
+	
+	return HIC_STATUS_ERROR_INIT;
 	}
 	return forceObserver_.getTorqueSensorFaultStatus(faultStatus);
 }
@@ -1479,13 +1942,17 @@ HicStatus HicControlCoordinator::computeZeroForceTorqueCommand(
 	// 因此，这里实现的是“安全优先的关节层零力示教”，
 	if (!initialized_)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INIT;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INIT;
+	
+	return lastStatus_;
 	}
 	if (!jointTorqueCommand || !jointProtectionStatus)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_NULL_POINTER;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_NULL_POINTER;
+	
+	return lastStatus_;
 	}
 
 	clearTorqueCommand(jointTorqueCommand);
@@ -1494,8 +1961,10 @@ HicStatus HicControlCoordinator::computeZeroForceTorqueCommand(
 	if (controlMode_ != HIC_CONTROL_MODE_FORCE_CONTROL ||
 	    forceControlMode_ != HIC_FORCE_CONTROL_MODE_ZERO_FORCE)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INVALID_PARAM;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INVALID_PARAM;
+	
+	return lastStatus_;
 	}
 
 	HicRobotState state = {};
@@ -1503,8 +1972,10 @@ HicStatus HicControlCoordinator::computeZeroForceTorqueCommand(
 	if (status != HIC_STATUS_OK)
 	{
 		clearTorqueCommand(jointTorqueCommand);
-		lastStatus_ = status;
-		return lastStatus_;
+	
+	lastStatus_ = status;
+	
+	return lastStatus_;
 	}
 
 	if (zeroForceStopRequested_ && isZeroForceExitReady(state.jointVelocity))
@@ -1515,26 +1986,33 @@ HicStatus HicControlCoordinator::computeZeroForceTorqueCommand(
 		forceControlMode_ = HIC_FORCE_CONTROL_MODE_NONE;
 		zeroForceStopRequested_ = false;
 		invalidateCommandCache();
-		lastStatus_ = HIC_STATUS_OK;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_OK;
+	
+	return lastStatus_;
 	}
 
 	if (config_.enableGravityCompensation)
 	{
 		// 零力示教的第一主项是重力补偿：
 		// 目标不是“把关节力矩做成 0”，而是尽量抵消机器人自身重力造成的静态负担，
-		status = dynamicsAdapter_.computeGravityTorque(state.jointPosition, jointTorqueCommand);
-		if (status != HIC_STATUS_OK)
+	
+	status = dynamicsAdapter_.computeGravityTorque(state.jointPosition, jointTorqueCommand);
+	
+	if (status != HIC_STATUS_OK)
 		{
 			clearTorqueCommand(jointTorqueCommand);
-			lastStatus_ = status;
-			return lastStatus_;
+		
+	lastStatus_ = status;
+		
+	return lastStatus_;
 		}
 	}
 
 	for (int i = 0; i < config_.jointCount; ++i)
 	{
-		const double damping = zeroForceStopRequested_ ? zeroForceExitDamping_[i] : zeroForceDamping_[i];
+	
+	const double damping = zeroForceStopRequested_ ? zeroForceExitDamping_[i] : zeroForceDamping_[i];
 		// jointTorqueCommand += -d * dq
 		//
 		// 它的作用不是“把机器人拉回某个位置”，
@@ -1552,8 +2030,10 @@ HicStatus HicControlCoordinator::computeZeroForceTorqueCommand(
 	{
 		// 一旦已经进入硬限位保护区，就不再尝试继续输出“修正型命令”，
 		clearTorqueCommand(jointTorqueCommand);
-		lastStatus_ = status;
-		return lastStatus_;
+	
+	lastStatus_ = status;
+	
+	return lastStatus_;
 	}
 
 	const HicStatus safetyStatus = applySafetyLimits(
@@ -1561,8 +2041,10 @@ HicStatus HicControlCoordinator::computeZeroForceTorqueCommand(
 	if (safetyStatus != HIC_STATUS_OK && safetyStatus != HIC_STATUS_ERROR_CURRENT_LIMIT)
 	{
 		clearTorqueCommand(jointTorqueCommand);
-		lastStatus_ = safetyStatus;
-		return lastStatus_;
+	
+	lastStatus_ = safetyStatus;
+	
+	return lastStatus_;
 	}
 
 	for (int i = 0; i < config_.jointCount; ++i)
@@ -1587,13 +2069,17 @@ HicStatus HicControlCoordinator::computeZeroForceCurrentCommand(
 	// 2. 再把关节力矩换算成电机电流；
 	if (!initialized_)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INIT;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INIT;
+	
+	return lastStatus_;
 	}
 	if (!motorCurrentCommand || !jointProtectionStatus)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_NULL_POINTER;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_NULL_POINTER;
+	
+	return lastStatus_;
 	}
 
 	clearCurrentCommand(motorCurrentCommand);
@@ -1604,28 +2090,34 @@ HicStatus HicControlCoordinator::computeZeroForceCurrentCommand(
 	if (status != HIC_STATUS_OK && status != HIC_STATUS_ERROR_CURRENT_LIMIT)
 	{
 		clearCurrentCommand(motorCurrentCommand);
-		lastStatus_ = status;
-		return lastStatus_;
+	
+	lastStatus_ = status;
+	
+	return lastStatus_;
 	}
 
 	const HicStatus convertStatus = convertTorqueToCurrent(jointTorqueCommand, motorCurrentCommand);
 	if (convertStatus != HIC_STATUS_OK)
 	{
 		clearCurrentCommand(motorCurrentCommand);
-		lastStatus_ = convertStatus;
-		return lastStatus_;
+	
+	lastStatus_ = convertStatus;
+	
+	return lastStatus_;
 	}
 
 	HicStatus currentStatus = status;
 	for (int i = 0; i < config_.jointCount; ++i)
 	{
 		// convertTorqueToCurrent() 已经做过一轮电流限幅；
-		const double limitedCurrent = clampToConfiguredRange(
+	
+	const double limitedCurrent = clampToConfiguredRange(
 			motorCurrentCommand[i],
 			config_.lowerMotorCurrent[i],
 			config_.upperMotorCurrent[i],
 			config_.maxJointCurrent[i]);
-		if (limitedCurrent != motorCurrentCommand[i])
+	
+	if (limitedCurrent != motorCurrentCommand[i])
 		{
 			motorCurrentCommand[i] = limitedCurrent;
 			jointProtectionStatus[i] = true;
@@ -1645,48 +2137,64 @@ HicStatus HicControlCoordinator::validateZeroForceEntry(HicRobotState* stateOut)
 	// 这个函数同时服务于“进入时校验”和“运行时持续校验”：
 	if (!stateOut)
 	{
-		return HIC_STATUS_ERROR_NULL_POINTER;
+	
+	return HIC_STATUS_ERROR_NULL_POINTER;
 	}
 
 	const HicStatus stateStatus = robotStateObserver_.getRobotState(*stateOut);
 	if (stateStatus != HIC_STATUS_OK || !robotStateObserver_.isStateValid())
 	{
-		return HIC_STATUS_ERROR_ROBOT_STATE;
+	
+	return HIC_STATUS_ERROR_ROBOT_STATE;
 	}
 	if (hasNaNOrInf(stateOut->jointPosition, config_.jointCount) ||
 		hasNaNOrInf(stateOut->jointVelocity, config_.jointCount) ||
 		hasNaNOrInf(stateOut->motorCurrent, config_.jointCount))
 	{
-		return HIC_STATUS_ERROR_ROBOT_STATE;
+	
+	return HIC_STATUS_ERROR_ROBOT_STATE;
 	}
 
 	for (int i = 0; i < config_.jointCount; ++i)
 	{
-		if (std::fabs(stateOut->jointVelocity[i]) > computeZeroForceEntryVelocityLimit(config_, i))
+	
+	if (std::fabs(stateOut->jointVelocity[i]) > computeZeroForceEntryVelocityLimit(config_, i))
 		{
-			return HIC_STATUS_ERROR_ROBOT_STATE;
+		
+	return HIC_STATUS_ERROR_ROBOT_STATE;
 		}
 
-		if (hasValidJointLimitWindow(config_, i))
+	
+	if (hasValidJointLimitWindow(config_, i))
 		{
-			const double lower = config_.lowerJointLimit[i];
-			const double upper = config_.upperJointLimit[i];
-			const double hardMargin = computeHardLimitMargin(config_, i);
-			if (stateOut->jointPosition[i] <= lower + hardMargin ||
+		
+	const double lower = config_.lowerJointLimit[i];
+		
+	const double upper = config_.upperJointLimit[i];
+		
+	const double hardMargin = computeHardLimitMargin(config_, i);
+		
+	if (stateOut->jointPosition[i] <= lower + hardMargin ||
 				stateOut->jointPosition[i] >= upper - hardMargin)
 			{
-				return HIC_STATUS_ERROR_JOINT_LIMIT;
+			
+	return HIC_STATUS_ERROR_JOINT_LIMIT;
 			}
 		}
 
-		const double torqueConstant = config_.torqueConstant[i];
-		const double gearRatio = config_.gearRatio[i];
-		const double transmissionEfficiency = config_.transmissionEfficiency[i];
-		if (!std::isfinite(torqueConstant) || !std::isfinite(gearRatio) ||
+	
+	const double torqueConstant = config_.torqueConstant[i];
+	
+	const double gearRatio = config_.gearRatio[i];
+	
+	const double transmissionEfficiency = config_.transmissionEfficiency[i];
+	
+	if (!std::isfinite(torqueConstant) || !std::isfinite(gearRatio) ||
 			!std::isfinite(transmissionEfficiency) || torqueConstant <= 0.0 ||
 			gearRatio <= 0.0 || transmissionEfficiency <= 0.0)
 		{
-			return HIC_STATUS_ERROR_INVALID_PARAM;
+		
+	return HIC_STATUS_ERROR_INVALID_PARAM;
 		}
 	}
 
@@ -1702,49 +2210,69 @@ HicStatus HicControlCoordinator::applyZeroForceSoftBoundaryDamping(
 {
 	if (!jointPosition || !jointVelocity || !jointTorqueCommand || !jointProtectionStatus)
 	{
-		return HIC_STATUS_ERROR_NULL_POINTER;
+	
+	return HIC_STATUS_ERROR_NULL_POINTER;
 	}
 
 	HicStatus status = HIC_STATUS_OK;
 	for (int i = 0; i < config_.jointCount; ++i)
 	{
-		if (!hasValidJointLimitWindow(config_, i))
+	
+	if (!hasValidJointLimitWindow(config_, i))
 		{
 			continue;
 		}
 
-		const double lower = config_.lowerJointLimit[i];
-		const double upper = config_.upperJointLimit[i];
-		const double hardMargin = computeHardLimitMargin(config_, i);
-		const double softMargin = std::max(computeSoftLimitMargin(config_, i), hardMargin);
-		const double q = jointPosition[i];
-		const double dq = jointVelocity[i];
+	
+	const double lower = config_.lowerJointLimit[i];
+	
+	const double upper = config_.upperJointLimit[i];
+	
+	const double hardMargin = computeHardLimitMargin(config_, i);
+	
+	const double softMargin = std::max(computeSoftLimitMargin(config_, i), hardMargin);
+	
+	const double q = jointPosition[i];
+	
+	const double dq = jointVelocity[i];
 
-		if (q <= lower + hardMargin || q >= upper - hardMargin)
+	
+	if (q <= lower + hardMargin || q >= upper - hardMargin)
 		{
 			jointProtectionStatus[i] = true;
 			jointTorqueCommand[i] = 0.0;
-			status = HIC_STATUS_ERROR_JOINT_LIMIT;
+		
+	status = HIC_STATUS_ERROR_JOINT_LIMIT;
 			continue;
 		}
 
-		const double baseDamping = exitDampingActive ? zeroForceExitDamping_[i] : zeroForceDamping_[i];
-		const double boundaryDamping = std::max(2.0 * baseDamping, baseDamping + 1.0);
-		const double lowerDistance = q - lower;
-		const double upperDistance = upper - q;
+	
+	const double baseDamping = exitDampingActive ? zeroForceExitDamping_[i] : zeroForceDamping_[i];
+	
+	const double boundaryDamping = std::max(2.0 * baseDamping, baseDamping + 1.0);
+	
+	const double lowerDistance = q - lower;
+	
+	const double upperDistance = upper - q;
 
-		if (dq < 0.0)
+	
+	if (dq < 0.0)
 		{
-			const double scale = computeSoftLimitDampingScale(lowerDistance, hardMargin, softMargin);
-			if (scale > 0.0)
+		
+	const double scale = computeSoftLimitDampingScale(lowerDistance, hardMargin, softMargin);
+		
+	if (scale > 0.0)
 			{
 				jointTorqueCommand[i] += -boundaryDamping * (1.0 + 3.0 * scale) * dq;
 			}
 		}
-		if (dq > 0.0)
+	
+	if (dq > 0.0)
 		{
-			const double scale = computeSoftLimitDampingScale(upperDistance, hardMargin, softMargin);
-			if (scale > 0.0)
+		
+	const double scale = computeSoftLimitDampingScale(upperDistance, hardMargin, softMargin);
+		
+	if (scale > 0.0)
 			{
 				jointTorqueCommand[i] += -boundaryDamping * (1.0 + 3.0 * scale) * dq;
 			}
@@ -1758,14 +2286,17 @@ bool HicControlCoordinator::isZeroForceExitReady(const double* jointVelocity) co
 {
 	if (!jointVelocity)
 	{
-		return false;
+	
+	return false;
 	}
 
 	for (int i = 0; i < config_.jointCount; ++i)
 	{
-		if (std::fabs(jointVelocity[i]) > computeZeroForceExitVelocityThreshold(config_, i))
+	
+	if (std::fabs(jointVelocity[i]) > computeZeroForceExitVelocityThreshold(config_, i))
 		{
-			return false;
+		
+	return false;
 		}
 	}
 	return true;
@@ -1781,13 +2312,17 @@ HicStatus HicControlCoordinator::computeCartesianImpedanceTorqueCommand(
 {
 	if (!initialized_)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INIT;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INIT;
+	
+	return lastStatus_;
 	}
 	if (!jointTorqueCommand || !jointProtectionStatus)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_NULL_POINTER;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_NULL_POINTER;
+	
+	return lastStatus_;
 	}
 
 	clearTorqueCommand(jointTorqueCommand);
@@ -1798,18 +2333,22 @@ HicStatus HicControlCoordinator::computeCartesianImpedanceTorqueCommand(
 	     forceControlMode_ != HIC_FORCE_CONTROL_MODE_CARTESIAN_FIXED_POSE &&
 	     forceControlMode_ != HIC_FORCE_CONTROL_MODE_CARTESIAN_TRAJECTORY))
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INVALID_PARAM;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INVALID_PARAM;
+	
+	return lastStatus_;
 	}
 
 	if (commandCacheValid_ && lastComputedVersion_ == commandInputVersion_)
 	{
-		for (int i = 0; i < config_.jointCount; ++i)
+	
+	for (int i = 0; i < config_.jointCount; ++i)
 		{
 			jointTorqueCommand[i] = lastJointTorqueCommand_[i];
 			jointProtectionStatus[i] = lastJointProtectionStatus_[i];
 		}
-		return lastStatus_;
+	
+	return lastStatus_;
 	}
 
 	const HicStatus status = runCartesianImpedanceStep(jointTorqueCommand, jointProtectionStatus);
@@ -1823,13 +2362,17 @@ HicStatus HicControlCoordinator::computeCartesianImpedanceCurrentCommand(
 {
 	if (!initialized_)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INIT;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INIT;
+	
+	return lastStatus_;
 	}
 	if (!motorCurrentCommand || !jointProtectionStatus)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_NULL_POINTER;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_NULL_POINTER;
+	
+	return lastStatus_;
 	}
 
 	double jointTorqueCommand[HIC_MAX_JOINTS] = { 0.0 };
@@ -1837,16 +2380,20 @@ HicStatus HicControlCoordinator::computeCartesianImpedanceCurrentCommand(
 	if (status != HIC_STATUS_OK && status != HIC_STATUS_ERROR_CURRENT_LIMIT)
 	{
 		clearCurrentCommand(motorCurrentCommand);
-		lastStatus_ = status;
-		return status;
+	
+	lastStatus_ = status;
+	
+	return status;
 	}
 
 	const HicStatus convertStatus = convertTorqueToCurrent(jointTorqueCommand, motorCurrentCommand);
 	if (convertStatus != HIC_STATUS_OK)
 	{
 		clearCurrentCommand(motorCurrentCommand);
-		lastStatus_ = convertStatus;
-		return convertStatus;
+	
+	lastStatus_ = convertStatus;
+	
+	return convertStatus;
 	}
 
 	lastStatus_ = status;
@@ -1861,38 +2408,44 @@ HicStatus HicControlCoordinator::computeForceControlTorqueCommand(
 	double* jointTorqueCommand,
 	bool* jointProtectionStatus)
 {
-	// 根据当前 forceControlMode_ 分发到具体子模式：
-	// 1. 零力模式输出重力/阻尼相关力矩；
-	// 2. 笛卡尔阻抗模式输出由末端误差映射得到的关节力矩；
-	// 3. 关节阻抗模式输出关节空间阻抗力矩。
-	// 本函数只负责得到关节侧力矩命令，不做电流换算。
+	// 根据当前 forceControlMode_ 分发到具体子模式�?	// 1. 零力模式输出重力/阻尼相关力矩�?	// 2. 笛卡尔阻抗模式输出由末端误差映射得到的关节力矩；
+	// 3. 关节阻抗模式输出关节空间阻抗力矩�?	// 本函数只负责得到关节侧力矩命令，不做电流换算�?
 	if (!initialized_)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INIT;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INIT;
+	
+	return lastStatus_;
 	}
 	if (!jointTorqueCommand || !jointProtectionStatus)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_NULL_POINTER;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_NULL_POINTER;
+	
+	return lastStatus_;
 	}
 
 	switch (forceControlMode_)
 	{
 	case HIC_FORCE_CONTROL_MODE_ZERO_FORCE:
-		return computeZeroForceTorqueCommand(jointTorqueCommand, jointProtectionStatus);
+	
+	return computeZeroForceTorqueCommand(jointTorqueCommand, jointProtectionStatus);
 	case HIC_FORCE_CONTROL_MODE_CARTESIAN_FIXED_POSITION:
 	case HIC_FORCE_CONTROL_MODE_CARTESIAN_FIXED_POSE:
 	case HIC_FORCE_CONTROL_MODE_CARTESIAN_TRAJECTORY:
-		return computeCartesianImpedanceTorqueCommand(jointTorqueCommand, jointProtectionStatus);
+	
+	return computeCartesianImpedanceTorqueCommand(jointTorqueCommand, jointProtectionStatus);
 	case HIC_FORCE_CONTROL_MODE_JOINT_IMPEDANCE:
-		return computeJointImpedanceTorqueCommand(jointTorqueCommand, jointProtectionStatus);
+	
+	return computeJointImpedanceTorqueCommand(jointTorqueCommand, jointProtectionStatus);
 	case HIC_FORCE_CONTROL_MODE_NONE:
 	default:
 		clearTorqueCommand(jointTorqueCommand);
 		clearProtectionStatus(jointProtectionStatus);
-		lastStatus_ = HIC_STATUS_ERROR_INVALID_PARAM;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INVALID_PARAM;
+	
+	return lastStatus_;
 	}
 }
 
@@ -1900,43 +2453,50 @@ HicStatus HicControlCoordinator::computeForceControlCurrentCommand(
 	double* motorCurrentCommand,
 	bool* jointProtectionStatus)
 {
-	// 电流命令统一链路：
-	// hic_get_force_control_current_commands()
+	// 电流命令统一链路�?	// hic_get_force_control_current_commands()
 	//   -> computeForceControlCurrentCommand()
 	//   -> computeForceControlTorqueCommand()
 	//   -> 当前力控子模式的力矩计算函数
 	//   -> convertTorqueToCurrent()
-	// 这样零力、笛卡尔阻抗、关节阻抗共享同一套安全限幅和电流换算逻辑。
+	// 这样零力、笛卡尔阻抗、关节阻抗共享同一套安全限幅和电流换算逻辑�?
 	if (!initialized_)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INIT;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INIT;
+	
+	return lastStatus_;
 	}
 	if (!motorCurrentCommand || !jointProtectionStatus)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_NULL_POINTER;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_NULL_POINTER;
+	
+	return lastStatus_;
 	}
 
 	clearCurrentCommand(motorCurrentCommand);
 	clearProtectionStatus(jointProtectionStatus);
 
 	double jointTorqueCommand[HIC_MAX_JOINTS] = { 0.0 };
-	// 第一步：先按当前力控子模式计算关节侧目标力矩。
+	// 第一步：先按当前力控子模式计算关节侧目标力矩�?
 	HicStatus status = computeForceControlTorqueCommand(jointTorqueCommand, jointProtectionStatus);
 	if (status != HIC_STATUS_OK && status != HIC_STATUS_ERROR_CURRENT_LIMIT)
 	{
 		clearCurrentCommand(motorCurrentCommand);
-		lastStatus_ = status;
-		return lastStatus_;
+	
+	lastStatus_ = status;
+	
+	return lastStatus_;
 	}
-	// 第二步：把关节侧目标力矩换算成电机电流命令。
+	// 第二步：把关节侧目标力矩换算成电机电流命令�?
 	const HicStatus convertStatus = convertTorqueToCurrent(jointTorqueCommand, motorCurrentCommand);
 	if (convertStatus != HIC_STATUS_OK)
 	{
 		clearCurrentCommand(motorCurrentCommand);
-		lastStatus_ = convertStatus;
-		return lastStatus_;
+	
+	lastStatus_ = convertStatus;
+	
+	return lastStatus_;
 	}
 
 	lastStatus_ = status;
@@ -1949,24 +2509,28 @@ HicStatus HicControlCoordinator::getCurrentCartesianState(
 {
 	if (!initialized_)
 	{
-		return HIC_STATUS_ERROR_INIT;
+	
+	return HIC_STATUS_ERROR_INIT;
 	}
 	if (!currentPose || !currentTwist)
 	{
-		return HIC_STATUS_ERROR_NULL_POINTER;
+	
+	return HIC_STATUS_ERROR_NULL_POINTER;
 	}
 
 	HicRobotState state = {};
 	HicStatus status = robotStateObserver_.getRobotState(state);
 	if (status != HIC_STATUS_OK || !robotStateObserver_.isStateValid())
 	{
-		return HIC_STATUS_ERROR_ROBOT_STATE;
+	
+	return HIC_STATUS_ERROR_ROBOT_STATE;
 	}
 
 	status = kinematicsAdapter_.computeForwardKinematics(state.jointPosition, currentPose);
 	if (status != HIC_STATUS_OK)
 	{
-		return status;
+	
+	return status;
 	}
 
 	return kinematicsAdapter_.computeEndEffectorTwist(
@@ -1997,16 +2561,29 @@ HicStatus HicControlCoordinator::getRobotState(HicRobotState& stateOut) const
 {
 	if (!initialized_)
 	{
-		return HIC_STATUS_ERROR_INIT;
+	
+	return HIC_STATUS_ERROR_INIT;
 	}
 	return robotStateObserver_.getRobotState(stateOut);
+}
+
+HicStatus HicControlCoordinator::getEstimatedDynamicsTorques(HicEstimatedDynamicsTorques& torquesOut) const
+{
+	if (!initialized_)
+	{
+	
+	return HIC_STATUS_ERROR_INIT;
+	}
+	torquesOut = lastEstimatedDynamicsTorques_;
+	return HIC_STATUS_OK;
 }
 
 HicStatus HicControlCoordinator::getConfigSnapshot(HicControlConfig& configOut) const
 {
 	if (!initialized_)
 	{
-		return HIC_STATUS_ERROR_INIT;
+	
+	return HIC_STATUS_ERROR_INIT;
 	}
 	configOut = config_;
 	return HIC_STATUS_OK;
@@ -2021,7 +2598,8 @@ HicStatus HicControlCoordinator::getLastJointTorqueCommand(double* jointTorqueCo
 {
 	if (!jointTorqueCommand)
 	{
-		return HIC_STATUS_ERROR_NULL_POINTER;
+	
+	return HIC_STATUS_ERROR_NULL_POINTER;
 	}
 
 	for (int i = 0; i < config_.jointCount; ++i)
@@ -2049,6 +2627,7 @@ HicStatus HicControlCoordinator::reset()
 	std::fill(lastCurrentTwist_, lastCurrentTwist_ + HIC_CARTESIAN_DIM, 0.0);
 	std::memset(&nullspaceConfig_, 0, sizeof(nullspaceConfig_));
 	std::memset(&jointImpedanceConfig_, 0, sizeof(jointImpedanceConfig_));
+	std::memset(&lastEstimatedDynamicsTorques_, 0, sizeof(lastEstimatedDynamicsTorques_));
 	robotStateObserver_.reset();
 	forceObserver_.reset();
 	impedanceCore_.reset();
@@ -2083,37 +2662,45 @@ HicStatus HicControlCoordinator::runCartesianImpedanceStep(
 	HicStatus status = robotStateObserver_.getRobotState(state);
 	if (status != HIC_STATUS_OK)
 	{
-		return status;
+	
+	return status;
 	}
 	if (!robotStateObserver_.isStateValid())
 	{
-		return HIC_STATUS_ERROR_ROBOT_STATE;
+	
+	return HIC_STATUS_ERROR_ROBOT_STATE;
 	}
 
 	status = kinematicsAdapter_.computeForwardKinematics(state.jointPosition, currentPose);
 	if (status != HIC_STATUS_OK)
 	{
-		return status;
+	
+	return status;
 	}
 
 	status = kinematicsAdapter_.computeJacobian(state.jointPosition, jacobianRowMajor);
 	if (status != HIC_STATUS_OK)
 	{
-		return status;
+	
+	return status;
 	}
 
 	status = kinematicsAdapter_.computeEndEffectorTwist(state.jointPosition, state.jointVelocity, currentTwist);
 	if (status != HIC_STATUS_OK)
 	{
-		return status;
+	
+	return status;
 	}
 
 	if (config_.enableGravityCompensation)
 	{
-		status = dynamicsAdapter_.computeGravityTorque(state.jointPosition, gravityTorque);
-		if (status != HIC_STATUS_OK)
+	
+	status = dynamicsAdapter_.computeGravityTorque(state.jointPosition, gravityTorque);
+	
+	if (status != HIC_STATUS_OK)
 		{
-			return status;
+		
+	return status;
 		}
 	}
 
@@ -2126,7 +2713,8 @@ HicStatus HicControlCoordinator::runCartesianImpedanceStep(
 		jointTorqueCommand);
 	if (status != HIC_STATUS_OK)
 	{
-		return status;
+	
+	return status;
 	}
 
 	for (int i = 0; i < config_.jointCount; ++i)
@@ -2138,7 +2726,8 @@ HicStatus HicControlCoordinator::runCartesianImpedanceStep(
 	if (status != HIC_STATUS_OK && status != HIC_STATUS_ERROR_CURRENT_LIMIT)
 	{
 		clearTorqueCommand(jointTorqueCommand);
-		return status;
+	
+	return status;
 	}
 
 	for (int i = 0; i < HIC_POSE_DIM; ++i)
@@ -2163,21 +2752,21 @@ HicStatus HicControlCoordinator::computeJointImpedanceTorqueCommand(
 	double* jointTorqueCommand,
 	bool* jointProtectionStatus)
 {
-	// 关节阻抗模式力矩链路：
-	// 1. 从 robotStateObserver_ 获取滤波后的 q、dq；
-	// 2. 可选读取 forceObserver_ 的外力矩估计，用于外力补偿；
-	// 3. jointImpedanceCore_ 计算阻抗力矩 tauImp；
-	// 4. dynamicsAdapter_ 计算重力补偿和可选科氏/离心补偿；
-	// 5. 叠加得到 jointTorqueCommand，并执行统一安全限幅。
+	// 关节阻抗模式力矩链路�?	// 1. �?robotStateObserver_ 获取滤波后的 q、dq�?	// 2. 可选读�?forceObserver_ 的外力矩估计，用于外力补偿；
+	// 3. jointImpedanceCore_ 计算阻抗力矩 tauImp�?	// 4. dynamicsAdapter_ 计算重力补偿和可选科�?离心补偿�?	// 5. 叠加得到 jointTorqueCommand，并执行统一安全限幅�?
 	if (!initialized_)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INIT;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INIT;
+	
+	return lastStatus_;
 	}
 	if (!jointTorqueCommand || !jointProtectionStatus)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_NULL_POINTER;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_NULL_POINTER;
+	
+	return lastStatus_;
 	}
 
 	clearTorqueCommand(jointTorqueCommand);
@@ -2186,96 +2775,124 @@ HicStatus HicControlCoordinator::computeJointImpedanceTorqueCommand(
 	if (controlMode_ != HIC_CONTROL_MODE_FORCE_CONTROL ||
 	    forceControlMode_ != HIC_FORCE_CONTROL_MODE_JOINT_IMPEDANCE)
 	{
-		lastStatus_ = HIC_STATUS_ERROR_INVALID_PARAM;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_INVALID_PARAM;
+	
+	return lastStatus_;
 	}
 
 	if (commandCacheValid_ && lastComputedVersion_ == commandInputVersion_)
 	{
-		for (int i = 0; i < config_.jointCount; ++i)
+	
+	for (int i = 0; i < config_.jointCount; ++i)
 		{
 			jointTorqueCommand[i] = lastJointTorqueCommand_[i];
 			jointProtectionStatus[i] = lastJointProtectionStatus_[i];
 		}
-		return lastStatus_;
+	
+	return lastStatus_;
 	}
 
 	double q[HIC_MAX_JOINTS] = { 0.0 };
 	double dq[HIC_MAX_JOINTS] = { 0.0 };
-	// 第一步：读取观测器中滤波后的关节位置和速度。
+	// 第一步：读取观测器中滤波后的关节位置和速度�?
 	HicStatus status = robotStateObserver_.getFilteredJointPosition(q);
 	if (status != HIC_STATUS_OK)
 	{
-		lastStatus_ = status;
-		return lastStatus_;
+	
+	lastStatus_ = status;
+	
+	return lastStatus_;
 	}
 	status = robotStateObserver_.getFilteredJointVelocity(dq);
 	if (status != HIC_STATUS_OK)
 	{
-		lastStatus_ = status;
-		return lastStatus_;
+	
+	lastStatus_ = status;
+	
+	return lastStatus_;
 	}
 	if (!robotStateObserver_.isStateValid())
 	{
-		lastStatus_ = HIC_STATUS_ERROR_ROBOT_STATE;
-		return lastStatus_;
+	
+	lastStatus_ = HIC_STATUS_ERROR_ROBOT_STATE;
+	
+	return lastStatus_;
 	}
 
 	double tauExt[HIC_MAX_JOINTS] = { 0.0 };
 	const double* tauExtPtr = nullptr;
 	if (jointImpedanceConfig_.enableExternalTorqueCompensation)
 	{
-		// 外力矩估计来自 motorEstimatedTorque - dynamicsModelTorque，可用于阻抗外力补偿。
-		status = forceObserver_.getFilteredJointExternalTorque(tauExt);
-		if (status != HIC_STATUS_OK)
+		if (jointImpedanceConfig_.externalTorqueSource == HIC_EXTERNAL_TORQUE_SOURCE_SENSOR)
 		{
-			lastStatus_ = status;
-			return lastStatus_;
+			status = forceObserver_.getFilteredJointExternalTorque_sensor(tauExt);
+		}
+		else
+		{
+			status = forceObserver_.getFilteredJointExternalTorque_current(tauExt);
+		}
+	
+	if (status != HIC_STATUS_OK)
+		{
+		
+	lastStatus_ = status;
+		
+	return lastStatus_;
 		}
 		tauExtPtr = tauExt;
 	}
 
 	double tauImp[HIC_MAX_JOINTS] = { 0.0 };
-	// 第二步：由关节阻抗核心计算 PD/阻抗项力矩。
+	// 第二步：由关节阻抗核心计�?PD/阻抗项力矩�?
 	status = jointImpedanceCore_.computeJointTorque(q, dq, tauExtPtr, tauImp);
 	if (status != HIC_STATUS_OK)
 	{
-		lastStatus_ = status;
-		return lastStatus_;
+	
+	lastStatus_ = status;
+	
+	return lastStatus_;
 	}
 
 	double tauGravity[HIC_MAX_JOINTS] = { 0.0 };
 	double tauCoriolis[HIC_MAX_JOINTS] = { 0.0 };
-	// 第三步：计算动力学前馈补偿项。
+	// 第三步：计算动力学前馈补偿项�?
 	status = dynamicsAdapter_.computeGravityTorque(q, tauGravity);
 	if (status != HIC_STATUS_OK)
 	{
-		lastStatus_ = status;
-		return lastStatus_;
+	
+	lastStatus_ = status;
+	
+	return lastStatus_;
 	}
 	if (config_.enableCoriolisCompensation)
 	{
-		status = dynamicsAdapter_.computeCoriolisTorque(q, dq, tauCoriolis);
-		if (status != HIC_STATUS_OK)
+	
+	status = dynamicsAdapter_.computeCoriolisTorque(q, dq, tauCoriolis);
+	
+	if (status != HIC_STATUS_OK)
 		{
-			lastStatus_ = status;
-			return lastStatus_;
+		
+	lastStatus_ = status;
+		
+	return lastStatus_;
 		}
 	}
 
 	for (int i = 0; i < config_.jointCount; ++i)
 	{
-		// 最终关节侧命令 = 阻抗力矩 + 重力补偿 + 可选科氏/离心补偿。
-		jointTorqueCommand[i] = tauImp[i] + tauGravity[i] + tauCoriolis[i];
+		// 最终关节侧命令 = 阻抗力矩 + 重力补偿 + 可选科�?离心补偿�?		jointTorqueCommand[i] = tauImp[i] + tauGravity[i] + tauCoriolis[i];
 	}
 
-	// 第四步：统一执行关节力矩/位置/速度等安全限制。
+	// 第四步：统一执行关节力矩/位置/速度等安全限制�?
 	status = applySafetyLimits(q, jointTorqueCommand, jointProtectionStatus);
 	if (status != HIC_STATUS_OK && status != HIC_STATUS_ERROR_CURRENT_LIMIT)
 	{
 		clearTorqueCommand(jointTorqueCommand);
-		lastStatus_ = status;
-		return lastStatus_;
+	
+	lastStatus_ = status;
+	
+	return lastStatus_;
 	}
 
 	for (int i = 0; i < config_.jointCount; ++i)
@@ -2296,47 +2913,60 @@ HicStatus HicControlCoordinator::applySafetyLimits(
 {
 	if (!jointPosition || !jointTorqueCommand || !jointProtectionStatus)
 	{
-		return HIC_STATUS_ERROR_NULL_POINTER;
+	
+	return HIC_STATUS_ERROR_NULL_POINTER;
 	}
 	if (hasNaNOrInf(jointTorqueCommand, config_.jointCount))
 	{
-		std::fill(jointTorqueCommand, jointTorqueCommand + config_.jointCount, 0.0);
-		return HIC_STATUS_ERROR_ROBOT_STATE;
+	
+	std::fill(jointTorqueCommand, jointTorqueCommand + config_.jointCount, 0.0);
+	
+	return HIC_STATUS_ERROR_ROBOT_STATE;
 	}
 
 	HicStatus status = HIC_STATUS_OK;
 	for (int i = 0; i < config_.jointCount; ++i)
 	{
-		const bool jointLimitEnabled =
+	
+	const bool jointLimitEnabled =
 			(config_.upperJointLimit[i] != 0.0 || config_.lowerJointLimit[i] != 0.0);
-		if (jointLimitEnabled &&
+	
+	if (jointLimitEnabled &&
 			(jointPosition[i] > config_.upperJointLimit[i] || jointPosition[i] < config_.lowerJointLimit[i]))
 		{
 			jointProtectionStatus[i] = true;
 			jointTorqueCommand[i] = 0.0;
-			status = HIC_STATUS_ERROR_JOINT_LIMIT;
+		
+	status = HIC_STATUS_ERROR_JOINT_LIMIT;
 			continue;
 		}
 
-		if (config_.enableTorqueRateLimit && config_.maxTorqueRate[i] > 0.0)
+	
+	if (config_.enableTorqueRateLimit && config_.maxTorqueRate[i] > 0.0)
 		{
 			// 斜率限制针对的是“本周期相对上一周期的变化量”，
-			const double delta = jointTorqueCommand[i] - previousJointTorqueCommand_[i];
-			const double limit = config_.maxTorqueRate[i] * config_.controlPeriod;
+		
+	const double delta = jointTorqueCommand[i] - previousJointTorqueCommand_[i];
+		
+	const double limit = config_.maxTorqueRate[i] * config_.controlPeriod;
 			jointTorqueCommand[i] = previousJointTorqueCommand_[i] +
-				std::max(-limit, std::min(limit, delta));
+			
+	std::max(-limit, std::min(limit, delta));
 		}
 
-		const double clampedTorque = clampToConfiguredRange(
+	
+	const double clampedTorque = clampToConfiguredRange(
 			jointTorqueCommand[i],
 			config_.lowerJointTorque[i],
 			config_.upperJointTorque[i],
 			config_.maxJointTorque[i]);
-		if (clampedTorque != jointTorqueCommand[i])
+	
+	if (clampedTorque != jointTorqueCommand[i])
 		{
 			jointTorqueCommand[i] = clampedTorque;
 			jointProtectionStatus[i] = true;
-			status = HIC_STATUS_ERROR_CURRENT_LIMIT;
+		
+	status = HIC_STATUS_ERROR_CURRENT_LIMIT;
 		}
 	}
 
@@ -2353,23 +2983,29 @@ HicStatus HicControlCoordinator::convertTorqueToCurrent(
 {
 	// 将关节侧目标力矩换算为电机电流命令：
 	// current = jointTorque / (torqueConstant * gearRatio * transmissionEfficiency)
-	// 如果启用了电流限制，换算后会按配置的电流上下限和最大电流进行限幅。
+	// 如果启用了电流限制，换算后会按配置的电流上下限和最大电流进行限幅�?
 	if (!jointTorqueCommand || !motorCurrentCommand)
 	{
-		return HIC_STATUS_ERROR_NULL_POINTER;
+	
+	return HIC_STATUS_ERROR_NULL_POINTER;
 	}
 
 	for (int i = 0; i < config_.jointCount; ++i)
 	{
-		const double denom =
+	
+	const double denom =
 			config_.torqueConstant[i] * config_.gearRatio[i] * config_.transmissionEfficiency[i];
-		if (denom <= 0.0)
+	
+	if (denom <= 0.0)
 		{
-			return HIC_STATUS_ERROR_INVALID_PARAM;
+		
+	return HIC_STATUS_ERROR_INVALID_PARAM;
 		}
 
-		double current = jointTorqueCommand[i] / denom;
-		if (config_.enableCurrentLimit)
+	
+	double current = jointTorqueCommand[i] / denom;
+	
+	if (config_.enableCurrentLimit)
 		{
 			current = clampToConfiguredRange(
 				current,
@@ -2425,9 +3061,11 @@ bool HicControlCoordinator::hasNaNOrInf(const double* data, int size) const
 {
 	for (int i = 0; i < size; ++i)
 	{
-		if (!std::isfinite(data[i]))
+	
+	if (!std::isfinite(data[i]))
 		{
-			return true;
+		
+	return true;
 		}
 	}
 	return false;

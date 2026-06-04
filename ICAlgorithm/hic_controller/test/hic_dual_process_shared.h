@@ -194,7 +194,7 @@ inline HicTorqueSensorConfig makeTorqueSensorConfig(const HicInitializeConfig& c
 	std::snprintf(torqueSensorConfig.sensorLocation, sizeof(torqueSensorConfig.sensorLocation), "post_reducer");
 	torqueSensorConfig.jointCount = config.jointCount;
 	torqueSensorConfig.enableTorqueSensorFilter = true;
-	torqueSensorConfig.enableExternalTorqueFilter = true;
+	torqueSensorConfig.enableExternalTorqueFilter_current = true;
 	torqueSensorConfig.enableSaturationCheck = true;
 	torqueSensorConfig.enableFaultCheck = true;
 
@@ -210,7 +210,7 @@ inline HicTorqueSensorConfig makeTorqueSensorConfig(const HicInitializeConfig& c
 		torqueSensorConfig.joints[i].biasNm = 0.0;
 		torqueSensorConfig.joints[i].maxValidTorqueNm = 120.0;
 		torqueSensorConfig.torqueSensorFilterAlpha[i] = 0.2;
-		torqueSensorConfig.externalTorqueFilterAlpha[i] = 0.2;
+		torqueSensorConfig.externalTorqueFilterAlpha_current[i] = 0.2;
 	}
 	return torqueSensorConfig;
 }

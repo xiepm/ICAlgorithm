@@ -9,12 +9,16 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 
 namespace hic
 {
 namespace
 {
+const int kSevenDofRobotType = 20;
+const int kSevenDofModelJointCount = 7;
+
 dynBasePtr* backendPtr(void* raw)
 {
 	return static_cast<dynBasePtr*>(raw);
@@ -51,11 +55,13 @@ dynBasePtr createBackend(int robotType)
 HicDynamicsAdapter::HicDynamicsAdapter()
 	: robotType_(0),
 	  jointCount_(0),
+	  modelJointCount_(0),
 	  initialized_(false),
 	  backend_(0),
 	  payloadMass_(0.0)
 {
-	std::fill(dynamicParams_, dynamicParams_ + HIC_MAX_DYNAMIC_PARAMS, 0.0);
+	std::fill(dynamicParams_current_, dynamicParams_current_ + HIC_MAX_DYNAMIC_PARAMS, 0.0);
+	std::fill(dynamicParams_sensor_, dynamicParams_sensor_ + HIC_MAX_DYNAMIC_PARAMS, 0.0);
 	std::fill(payloadCenterOfMass_, payloadCenterOfMass_ + 3, 0.0);
 }
 
@@ -73,6 +79,10 @@ HicStatus HicDynamicsAdapter::initialize(
 	{
 		return HIC_STATUS_ERROR_INVALID_PARAM;
 	}
+	if (robotType == kSevenDofRobotType && jointCount < kSevenDofModelJointCount)
+	{
+		return HIC_STATUS_ERROR_INVALID_PARAM;
+	}
 
 	reset();
 	backend_ = new dynBasePtr(createBackend(robotType));
@@ -82,27 +92,43 @@ HicStatus HicDynamicsAdapter::initialize(
 		return HIC_STATUS_ERROR_INIT;
 	}
 
-	std::memcpy(dynamicParams_, dynamicParams, sizeof(double) * HIC_MAX_DYNAMIC_PARAMS);
+	std::memcpy(dynamicParams_current_, dynamicParams, sizeof(double) * HIC_MAX_DYNAMIC_PARAMS);
+	std::memcpy(dynamicParams_sensor_, dynamicParams, sizeof(double) * HIC_MAX_DYNAMIC_PARAMS);
 	(*backendPtr(backend_))->setGravityVector(0.0, 0.0, -9.81);
 	robotType_ = robotType;
 	jointCount_ = jointCount;
+	modelJointCount_ = (robotType == kSevenDofRobotType) ? kSevenDofModelJointCount : jointCount;
 	initialized_ = true;
+#ifdef HIC_ENABLE_DEBUG_PRINT
+	std::fprintf(stderr,
+		"[HicDynamicsAdapter::initialize] robotType=%d externalJointCount=%d modelJointCount=%d\n",
+		robotType_,
+		jointCount_,
+		modelJointCount_);
+	std::fflush(stderr);
+#endif
 	return HIC_STATUS_OK;
 }
 
 HicStatus HicDynamicsAdapter::setDynamicParameters(const double* dynamicParams)
 {
-	if (!initialized_)
+	HicStatus status = setDynamicParametersTo(dynamicParams_current_, dynamicParams);
+	if (status != HIC_STATUS_OK)
 	{
-		return HIC_STATUS_ERROR_INIT;
+		return status;
 	}
-	if (!dynamicParams)
-	{
-		return HIC_STATUS_ERROR_NULL_POINTER;
-	}
+	return setDynamicParametersTo(dynamicParams_sensor_, dynamicParams);
+}
 
-	std::memcpy(dynamicParams_, dynamicParams, sizeof(double) * HIC_MAX_DYNAMIC_PARAMS);
-	return HIC_STATUS_OK;
+HicStatus HicDynamicsAdapter::setDynamicParameters_current(const double* dynamicParams)
+{
+	HicStatus status = setDynamicParametersTo(dynamicParams_current_, dynamicParams);
+	return status;
+}
+
+HicStatus HicDynamicsAdapter::setDynamicParameters_sensor(const double* dynamicParams)
+{
+	return setDynamicParametersTo(dynamicParams_sensor_, dynamicParams);
 }
 
 HicStatus HicDynamicsAdapter::setRobotKinematicParameters(const double* kinematicParams)
@@ -177,18 +203,20 @@ HicStatus HicDynamicsAdapter::computeGravityTorque(
 		return HIC_STATUS_ERROR_NULL_POINTER;
 	}
 
-	EcRealVector q(jointCount_, 0.0), tau(jointCount_, 0.0), params(jointCount_ * 13, 0.0);
-	for (int i = 0; i < jointCount_; ++i)
+	std::fill(gravityTorque, gravityTorque + jointCount_, 0.0);
+
+	EcRealVector q(modelJointCount_, 0.0), tau(modelJointCount_, 0.0), params(modelJointCount_ * 13, 0.0);
+	for (int i = 0; i < modelJointCount_; ++i)
 	{
 		q[i] = jointPosition[i];
 	}
-	for (int i = 0; i < jointCount_ * 13; ++i)
+	for (int i = 0; i < modelJointCount_ * 13; ++i)
 	{
-		params[i] = dynamicParams_[i];
+		params[i] = dynamicParams_current_[i];
 	}
 
 	(*backendPtr(backend_))->calculateGravityJointTorques(q, params, tau);
-	for (int i = 0; i < jointCount_; ++i)
+	for (int i = 0; i < modelJointCount_; ++i)
 	{
 		gravityTorque[i] = tau[i];
 	}
@@ -196,19 +224,33 @@ HicStatus HicDynamicsAdapter::computeGravityTorque(
 }
 
 HicStatus HicDynamicsAdapter::computeCoriolisTorque(
-	const double*,
-	const double*,
+	const double* jointPosition,
+	const double* jointVelocity,
 	double* coriolisTorque)
 {
-	if (!coriolisTorque)
+	if (!initialized_)
+	{
+		return HIC_STATUS_ERROR_INIT;
+	}
+	if (!jointPosition || !jointVelocity || !coriolisTorque)
 	{
 		return HIC_STATUS_ERROR_NULL_POINTER;
 	}
-	for (int i = 0; i < jointCount_; ++i)
+	std::fill(coriolisTorque, coriolisTorque + jointCount_, 0.0);
+
+	EcRealVector q(modelJointCount_, 0.0), dq(modelJointCount_, 0.0), tau(modelJointCount_, 0.0);
+	for (int i = 0; i < modelJointCount_; ++i)
 	{
-		coriolisTorque[i] = 0.0;
+		q[i] = jointPosition[i];
+		dq[i] = jointVelocity[i];
 	}
-	return HIC_STATUS_ERROR_NOT_IMPLEMENTED;
+
+	(*backendPtr(backend_))->computeCoriolisTorque(q, dq, tau);
+	for (int i = 0; i < modelJointCount_; ++i)
+	{
+		coriolisTorque[i] = tau[i];
+	}
+	return HIC_STATUS_OK;
 }
 
 HicStatus HicDynamicsAdapter::computeMassMatrix(
@@ -227,18 +269,123 @@ HicStatus HicDynamicsAdapter::computeMassMatrix(
 }
 
 HicStatus HicDynamicsAdapter::computeFrictionTorque(
-	const double*,
+	const double* jointPosition,
+	const double* jointVelocity,
+	const double* jointAcceleration,
 	double* frictionTorque)
 {
-	if (!frictionTorque)
+	if (!initialized_)
+	{
+		return HIC_STATUS_ERROR_INIT;
+	}
+	if (!jointPosition || !jointVelocity || !jointAcceleration || !frictionTorque)
 	{
 		return HIC_STATUS_ERROR_NULL_POINTER;
 	}
-	for (int i = 0; i < jointCount_; ++i)
+	std::fill(frictionTorque, frictionTorque + jointCount_, 0.0);
+
+	EcRealVector q(modelJointCount_, 0.0), dq(modelJointCount_, 0.0), ddq(modelJointCount_, 0.0), tau(modelJointCount_, 0.0);
+	for (int i = 0; i < modelJointCount_; ++i)
 	{
-		frictionTorque[i] = 0.0;
+		q[i] = jointPosition[i];
+		dq[i] = jointVelocity[i];
+		ddq[i] = jointAcceleration[i];
 	}
-	return HIC_STATUS_ERROR_NOT_IMPLEMENTED;
+
+	(*backendPtr(backend_))->computeFrictionTorque(q, dq, ddq, tau);
+	for (int i = 0; i < modelJointCount_; ++i)
+	{
+		frictionTorque[i] = tau[i];
+	}
+	return HIC_STATUS_OK;
+}
+
+HicStatus HicDynamicsAdapter::computeModelTorque_current(
+	const double* jointPosition,
+	const double* jointVelocity,
+	const double* jointAcceleration,
+	double* modelTorque)
+{
+	return computeModelTorqueWithParameters(
+		dynamicParams_current_,
+		jointPosition,
+		jointVelocity,
+		jointAcceleration,
+		modelTorque);
+}
+
+HicStatus HicDynamicsAdapter::computeModelTorque_sensor(
+	const double* jointPosition,
+	const double* jointVelocity,
+	const double* jointAcceleration,
+	double* modelTorque)
+{
+	return computeModelTorqueWithParameters(
+		dynamicParams_sensor_,
+		jointPosition,
+		jointVelocity,
+		jointAcceleration,
+		modelTorque);
+}
+
+HicStatus HicDynamicsAdapter::setDynamicParametersTo(double* destination, const double* dynamicParams)
+{
+	if (!initialized_)
+	{
+		return HIC_STATUS_ERROR_INIT;
+	}
+	if (!destination || !dynamicParams)
+	{
+		return HIC_STATUS_ERROR_NULL_POINTER;
+	}
+
+	std::memcpy(destination, dynamicParams, sizeof(double) * HIC_MAX_DYNAMIC_PARAMS);
+	return HIC_STATUS_OK;
+}
+
+HicStatus HicDynamicsAdapter::computeModelTorqueWithParameters(
+	const double* dynamicParams,
+	const double* jointPosition,
+	const double* jointVelocity,
+	const double* jointAcceleration,
+	double* modelTorque)
+{
+	if (!initialized_)
+	{
+		return HIC_STATUS_ERROR_INIT;
+	}
+	if (!dynamicParams || !jointPosition || !jointVelocity || !jointAcceleration || !modelTorque)
+	{
+		return HIC_STATUS_ERROR_NULL_POINTER;
+	}
+
+	std::fill(modelTorque, modelTorque + jointCount_, 0.0);
+	EcRealVector q(modelJointCount_, 0.0);
+	EcRealVector dq(modelJointCount_, 0.0);
+	EcRealVector ddq(modelJointCount_, 0.0);
+	EcRealVector params(modelJointCount_ * 13, 0.0);
+	EcRealVector tau(modelJointCount_, 0.0);
+	for (int i = 0; i < modelJointCount_; ++i)
+	{
+		q[i] = jointPosition[i];
+		dq[i] = jointVelocity[i];
+		ddq[i] = jointAcceleration[i];
+	}
+	for (int i = 0; i < modelJointCount_ * 13; ++i)
+	{
+		params[i] = dynamicParams[i];
+	}
+
+	const EcBoolean ok = (*backendPtr(backend_))->calculateEstimateJointToqrues(q, dq, ddq, params, tau);
+	if (!ok)
+	{
+		return HIC_STATUS_ERROR_NOT_IMPLEMENTED;
+	}
+	for (int i = 0; i < modelJointCount_; ++i)
+	{
+		modelTorque[i] = tau[i];
+	}
+	return HIC_STATUS_OK;
 }
 
 void HicDynamicsAdapter::reset()
@@ -251,7 +398,9 @@ void HicDynamicsAdapter::reset()
 	initialized_ = false;
 	robotType_ = 0;
 	jointCount_ = 0;
-	std::fill(dynamicParams_, dynamicParams_ + HIC_MAX_DYNAMIC_PARAMS, 0.0);
+	modelJointCount_ = 0;
+	std::fill(dynamicParams_current_, dynamicParams_current_ + HIC_MAX_DYNAMIC_PARAMS, 0.0);
+	std::fill(dynamicParams_sensor_, dynamicParams_sensor_ + HIC_MAX_DYNAMIC_PARAMS, 0.0);
 	payloadMass_ = 0.0;
 	std::fill(payloadCenterOfMass_, payloadCenterOfMass_ + 3, 0.0);
 }

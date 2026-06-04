@@ -62,7 +62,7 @@ HicStatus HicJointImpedanceCore::captureTargetPosition(const double* jointPositi
 HicStatus HicJointImpedanceCore::computeJointTorque(
 	const double* jointPosition,
 	const double* jointVelocity,
-	const double* externalTorque,
+	const double* externalTorque_current,
 	double* jointTorque)
 {
 	if (!initialized_)
@@ -82,9 +82,9 @@ HicStatus HicJointImpedanceCore::computeJointTorque(
 		const double positionError = config_.targetPosition[i] - jointPosition[i];
 		const double velocityError = config_.targetVelocity[i] - jointVelocity[i];
 		double torque = config_.stiffness[i] * positionError + config_.damping[i] * velocityError;
-		if (config_.enableExternalTorqueCompensation && externalTorque)
+		if (config_.enableExternalTorqueCompensation && externalTorque_current)
 		{
-			torque -= externalTorque[i];
+			torque -= externalTorque_current[i];
 		}
 
 		lastPositionError_[i] = positionError;

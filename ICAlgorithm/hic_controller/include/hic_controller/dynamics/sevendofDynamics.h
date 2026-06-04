@@ -75,7 +75,7 @@ public:
 		const EcRealVector& q,
 		const EcRealVector& dq,
 		EcRealVector& tau
-	) const;
+	) const override;
 
 	void computeGravityAxisTorques
 	(
@@ -91,7 +91,7 @@ public:
 		const EcRealVector& dq,
 		const EcRealVector& ddq,
 		EcRealVector& tau
-	) const;
+	) const override;
 
 	void computeInverseDynamics
 	(

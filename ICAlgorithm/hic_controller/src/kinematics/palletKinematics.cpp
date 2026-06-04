@@ -1,4 +1,4 @@
-﻿#include "hic_controller/kinematics/palletKinematics.h"
+#include "hic_controller/kinematics/palletKinematics.h"
 #include <iostream>
 
 
@@ -31,7 +31,7 @@ palletKinematics::~palletKinematics()
 
 }
 
-// 入参kinematcisParam: [d1 d2 d3 d4 d5 d6 a2 a3]
+// ���kinematcisParam: [d1 d2 d3 d4 d5 d6 a2 a3]
 void palletKinematics::setRobotDHParameters
 (
 	const EcRealVector& kinematcisParam
@@ -87,7 +87,7 @@ void palletKinematics::setJointMotionLimit
 {   
 	for (int i = 0; i < NUMOFJOINTS5; i++)
 	{
-		m_upperJointLimit[i] = upperJointLimit[i] + epsilon; // 避免由于数值传参损失精度导致边界解丢失
+		m_upperJointLimit[i] = upperJointLimit[i] + epsilon; // ����������ֵ������ʧ���ȵ��±߽�ⶪʧ
 		m_lowerJointLimit[i] = lowerJointLimit[i] - epsilon;
 	}
 }
@@ -146,8 +146,8 @@ void palletKinematics::forwardKinematics2
 
 ENInverseKineState palletKinematics::inverseKinematics(const Frame& targetPose, const EcRealVector& refJoint, EcRealVector& targetJoint)
 {
-	targetJoint = refJoint; // 默认返回参考角
-	// 获取目标位姿
+	targetJoint = refJoint; // Ĭ�Ϸ��زο���
+	// ��ȡĿ��λ��
 	Frame T = targetPose * m_toolFrame.Inverse();
 	EcReal nx = T(0, 0);
 	EcReal ny = T(1, 0);
@@ -162,28 +162,28 @@ ENInverseKineState palletKinematics::inverseKinematics(const Frame& targetPose, 
 	EcReal py = T(1, 3);
 	EcReal pz = T(2, 3);
 
-	// 初始化全逆解的二维数组
+	// ��ʼ��ȫ���Ķ�ά����
 	EcReal q[NUMOFSOLVED4][NUMOFJOINTS5] = { 0 };
 	for (int i = 0; i < NUMOFSOLVED4; i++)
 	{
-		q[i][3] = INFINITE;  // 将q4置为是否可解的标志位
+		q[i][3] = INFINITE;  // ��q4��Ϊ�Ƿ�ɽ�ı�־λ
 	}
-	EcBoolean palletState = false;  // 末端位姿是否处于码垛状态的标志
+	EcBoolean palletState = false;  // ĩ��λ���Ƿ������״̬�ı�־
 
 	EcReal s1, c1, s2, c2, s3, c3, s5, c5, s6, c6, s234, c234;
 	EcReal ka, kb, kc, kd;
 	EcU32 halfNumOfSolutions = NUMOFSOLVED4 / 2;
 
 	// q1
-	EcReal consistentCondition = fabs(fabs(px * ay - py * ax) - m_d4 * KDL::sqrt(ax * ax + ay * ay));  // 位姿相容性条件
+	EcReal consistentCondition = fabs(fabs(px * ay - py * ax) - m_d4 * KDL::sqrt(ax * ax + ay * ay));  // λ������������
 	if (consistentCondition < 0.00001)
 	{
-		if ((ax * ax + ay * ay) < EPSILON2)  // 码垛状态基于位置约束处理多解情形
+		if ((ax * ax + ay * ay) < EPSILON2)  // ���״̬����λ��Լ������������
 		{
 			EcReal dSquare = px * px + py * py - m_d4 * m_d4;
 			if (dSquare < EPSILON2)
 			{
-				// std::cout << "Shoulder Singularity，or Ouside of Workspace!" << std::endl; // 目标点落入黑柱内
+				// std::cout << "Shoulder Singularity��or Ouside of Workspace!" << std::endl; // Ŀ������������
 				targetJoint = refJoint;
 				return ikState_noSolution;
 			}
@@ -199,7 +199,7 @@ ENInverseKineState palletKinematics::inverseKinematics(const Frame& targetPose, 
 
 			palletState = true;
 		}
-		else  // 非码垛状态基于姿态约束处理单解情形
+		else  // �����״̬������̬Լ�������������
 		{
 			if ((px * ay - py * ax) > 0)
 			{
@@ -217,7 +217,7 @@ ENInverseKineState palletKinematics::inverseKinematics(const Frame& targetPose, 
 			}
 			else
 			{
-				// 暂不处理(事实上，在m_d4的值大于1e-6时，永远不会进入该条件分支)
+				// �ݲ�����(��ʵ�ϣ���m_d4��ֵ����1e-6ʱ����Զ��������������֧)
 			}
 
 			palletState = false;
@@ -225,18 +225,18 @@ ENInverseKineState palletKinematics::inverseKinematics(const Frame& targetPose, 
 	}
 	else
 	{
-		// std::cout << "Pose is Inconsistent!" << std::endl; // 位姿不相容
+		// std::cout << "Pose is Inconsistent!" << std::endl; // λ�˲�����
 		targetJoint = refJoint;
 		return ikState_noSolution;
 	}
 
-	EcU32Vector shoulderRowSet = { 0 }; // 基于肩部臂型区分的全逆解数组的起始行
+	EcU32Vector shoulderRowSet = { 0 }; // ���ڼ粿�������ֵ�ȫ����������ʼ��
 	if (palletState)
 	{
-		shoulderRowSet.push_back(halfNumOfSolutions);  // 码垛状态有两个起始行
+		shoulderRowSet.push_back(halfNumOfSolutions);  // ���״̬��������ʼ��
 	}
 
-	for (EcU32 startRow : shoulderRowSet)  // 采用值拷贝而非传引用，避免对遍历元素的修改
+	for (EcU32 startRow : shoulderRowSet)  // ����ֵ�������Ǵ����ã�����Ա���Ԫ�ص��޸�
 	{
 		s1 = KDL::sin(q[startRow][0]);  c1 = KDL::cos(q[startRow][0]);
 		// q5
@@ -248,14 +248,14 @@ ENInverseKineState palletKinematics::inverseKinematics(const Frame& targetPose, 
 		}
 
 		// q2/q3/q4
-		int GCE; // 肘部臂型
+		int GCE; // �ⲿ����
 		EcReal r, cTriangle;
 		EcReal q2, q3, q4;
 		kc = px * c1 + py * s1 - m_d5 * (ax * c1 + ay * s1);
 		kd = pz - m_d1 - az * m_d5;
 		r = KDL::sqrt(kc * kc + kd * kd);
 
-		if (r > fabs(m_a2 + m_a3) || r < fabs(m_a2 - m_a3)) // 超出工作空间
+		if (r > fabs(m_a2 + m_a3) || r < fabs(m_a2 - m_a3)) // ���������ռ�
 		{
 			// std::cout << "startRow:" << startRow << " , Ouside of Workspace!" << std::endl;
 			for (int i = 0; i < halfNumOfSolutions; i++)
@@ -266,7 +266,7 @@ ENInverseKineState palletKinematics::inverseKinematics(const Frame& targetPose, 
 		else
 		{
 			cTriangle = (m_a2 * m_a2 + m_a3 * m_a3 - r * r) / (2 * m_a2 * m_a3);
-			if (fabs(cTriangle) >= 1 - EPSILON2) // 肘部奇异附近
+			if (fabs(cTriangle) >= 1 - EPSILON2) // �ⲿ���츽��
 			{
 				// std::cout << "startRow:" << startRow << " , Elbow Singularity!" << std::endl;
 				cTriangle = KDL::sign(cTriangle);
@@ -291,9 +291,9 @@ ENInverseKineState palletKinematics::inverseKinematics(const Frame& targetPose, 
 
 	}
 
-	// 检查是否有解
+	// ����Ƿ��н�
 	int count = 0;
-	for (int i = 0; i < NUMOFSOLVED4; i++) // 将q4置为是否可解的标志位
+	for (int i = 0; i < NUMOFSOLVED4; i++) // ��q4��Ϊ�Ƿ�ɽ�ı�־λ
 	{
 		if (INFINITE == q[i][3])
 		{
@@ -309,7 +309,7 @@ ENInverseKineState palletKinematics::inverseKinematics(const Frame& targetPose, 
 	EcRealVectorVector jointPositions(NUMOFSOLVED4, EcRealVector(NUMOFJOINTS5, 0.0));
 	normalize(refJoint, q, jointPositions);
 
-	// 根据行程最短原则选解，后续整理为单独的函数
+	// �����г����ԭ��ѡ�⣬��������Ϊ�����ĺ���
 	EcReal faux0, faux1, faux2;
 	EcRealVector sum1(NUMOFSOLVED4), sum2(NUMOFSOLVED4), sum3(NUMOFSOLVED4), sum5(NUMOFSOLVED4);
 	for (int i = 0; i < NUMOFSOLVED4; i++)
@@ -327,7 +327,7 @@ ENInverseKineState palletKinematics::inverseKinematics(const Frame& targetPose, 
 		faux1 = jointPositions[i][4] - refJoint[4];
 		sum5[i] = sum3[i] + faux0 * faux0 + faux1 * faux1;
 	}
-	// 依次比较总行程/前三个关节行程/前两个关节行程/第一个关节的行程
+	// ���αȽ����г�/ǰ�����ؽ��г�/ǰ�����ؽ��г�/��һ���ؽڵ��г�
 	int out_index = 0;
 	for (int i = 1; i < NUMOFSOLVED4; i++)
 	{
@@ -361,9 +361,9 @@ ENInverseKineState palletKinematics::inverseKinematics(const Frame& targetPose, 
 	{
 		targetJoint[i] = jointPositions[out_index][i];
 	}
-	targetJoint[5] = 0;  // 关节6默认为0
+	targetJoint[5] = 0;  // �ؽ�6Ĭ��Ϊ0
 
-	// 检查关节超限
+	// ���ؽڳ���
 	for (int i = 0; i < NUMOFJOINTS5; i++)
 	{
 		if ((targetJoint[i] < m_lowerJointLimit[i]) || (targetJoint[i] > m_upperJointLimit[i]))
@@ -372,8 +372,8 @@ ENInverseKineState palletKinematics::inverseKinematics(const Frame& targetPose, 
 		}
 	}
 
-	// 逆解连续性判据(待商榷)
-	EcReal maxDisplacement = PI / 6;  // 暂无理论根据
+	// ����������о�(����ȶ)
+	EcReal maxDisplacement = PI / 6;  // �������۸���
 	EcReal sumDisplacement = 0;
 	for (int i = 0; i < NUMOFJOINTS5; i++)
 	{
@@ -393,19 +393,19 @@ void palletKinematics::normalize(const EcRealVector& refJoint, EcReal qArray[][N
 	EcRealVector expandedSolution(NUMOFJOINTS5, 0.0);
 	EcRealVector currentDatumPoint(NUMOFJOINTS5, 0.0);
 
-	// [-pi,pi]内的standardSolution和[-pi,pi]外的expandedSolution，以及其他平移2PI后的解，统称为periodicSolution
+	// [-pi,pi]�ڵ�standardSolution��[-pi,pi]���expandedSolution���Լ�����ƽ��2PI��Ľ⣬ͳ��ΪperiodicSolution
 	for (int i = 0; i < NUMOFSOLVED4; i++)
 	{
-		// 获取refJoint对应的基准点
+		// ��ȡrefJoint��Ӧ�Ļ�׼��
 		for (int j = 0; j < NUMOFJOINTS5; j++)
 		{
 			int temp = fabs(refJoint[j]) / PI;
-			currentDatumPoint[j] = sign(refJoint[j]) * (temp + temp % 2) * PI;  // 获取距离refJoint最近的2kPI作为[-3PI,3PI]平移的参考基准点
+			currentDatumPoint[j] = sign(refJoint[j]) * (temp + temp % 2) * PI;  // ��ȡ����refJoint�����2kPI��Ϊ[-3PI,3PI]ƽ�ƵĲο���׼��
 		}
-		// 先得到refJoint附近的标准解;
+		// �ȵõ�refJoint�����ı�׼��;
 		for (int j = 0; j < NUMOFJOINTS5; j++)
 		{
-			// 获取[-pi,pi]内的标准解
+			// ��ȡ[-pi,pi]�ڵı�׼��
 			if (qArray[i][j] > PI)
 			{
 				standardSolution[j] = qArray[i][j] - 2.0 * PI;
@@ -418,12 +418,12 @@ void palletKinematics::normalize(const EcRealVector& refJoint, EcReal qArray[][N
 			{
 				standardSolution[j] = qArray[i][j];
 			}
-			standardSolution[j] += currentDatumPoint[j]; // 标准解平移至refJoint附近
+			standardSolution[j] += currentDatumPoint[j]; // ��׼��ƽ����refJoint����
 		}
-		// 再得到refJoint附近的最近拓展解（单侧）;
+		// �ٵõ�refJoint�����������չ�⣨���ࣩ;
 		for (int j = 0; j < NUMOFJOINTS5; j++)
 		{
-			// 由于refJoint一定满足关节极限，故仅需考虑refJoint左/右最邻近的两个周期解，其中一个一定为标准解,另一个为另一侧的拓展解
+			// ����refJointһ������ؽڼ��ޣ��ʽ��迼��refJoint��/�����ڽ����������ڽ⣬����һ��һ��Ϊ��׼��,��һ��Ϊ��һ�����չ��
 			if (standardSolution[j] > refJoint[j]) 
 			{
 				expandedSolution[j] = standardSolution[j] - 2.0 * PI;
@@ -432,16 +432,16 @@ void palletKinematics::normalize(const EcRealVector& refJoint, EcReal qArray[][N
 			{
 				expandedSolution[j] = standardSolution[j] + 2.0 * PI;
 			}
-			// normalize过程: 优先考虑解的可行性
-			if ((isInJointLimit(standardSolution[j], j)) && (!isInJointLimit(expandedSolution[j], j))) // 只有标准解满足关节极限时
+			// normalize����: ���ȿ��ǽ�Ŀ�����
+			if ((isInJointLimit(standardSolution[j], j)) && (!isInJointLimit(expandedSolution[j], j))) // ֻ�б�׼������ؽڼ���ʱ
 			{
 				qVector[i][j] = standardSolution[j];
 			}
-			else if ((!isInJointLimit(standardSolution[j], j)) && (isInJointLimit(expandedSolution[j], j))) // 只有拓展解满足关节极限时
+			else if ((!isInJointLimit(standardSolution[j], j)) && (isInJointLimit(expandedSolution[j], j))) // ֻ����չ������ؽڼ���ʱ
 			{
 				qVector[i][j] = expandedSolution[j];
 			}
-			else // 如果标准解和拓展解，两者同时满足/同时不满足关节极限，则选择距离refJoint较近的解作为normalize的输出
+			else // �����׼�����չ�⣬����ͬʱ����/ͬʱ������ؽڼ��ޣ���ѡ�����refJoint�Ͻ��Ľ���Ϊnormalize�����
 			{
 				qVector[i][j] = (fabs(standardSolution[j] - refJoint[j]) < fabs(expandedSolution[j] - refJoint[j])) ? standardSolution[j] : expandedSolution[j];
 			}
@@ -498,7 +498,7 @@ void palletKinematics::getJacobianDotWithToolMatrix(const VectorXd& jointPositio
 	{
 		T = T * Frame::DH(m_mk2DH.a[i - 1], m_mk2DH.alpha[i - 1], m_mk2DH.d[i - 1], calcAcs[i - 1]);
 		if (i == NUMOFJOINTS5)
-			T = T * m_toolFrame;			// 叠加工具坐标系的偏置
+			T = T * m_toolFrame;			// ���ӹ�������ϵ��ƫ��
 
 		m_zAxis[i] = T.M.UnitZ();
 		m_pAxis[i] = T.p;
@@ -542,7 +542,7 @@ EcReal palletKinematics::getJacobianMatrix(const EcRealVector& jointPosition, Ei
 		0, -c1, -c1, -c1, s234 * s1,
 		1, 0, 0, 0, -c234;
 
-	Eigen::MatrixXd gramianMatrix = Jacobian.transpose() * Jacobian;   // 引入Gramian矩阵描述6×5雅克比的奇异性
+	Eigen::MatrixXd gramianMatrix = Jacobian.transpose() * Jacobian;   // ����Gramian��������6��5�ſ˱ȵ�������
 
 	return KDL::sqrt(gramianMatrix.determinant());
 }
@@ -551,7 +551,7 @@ EcReal palletKinematics::getJacobianConditionNum(const EcRealVector& jointPositi
 {
 	EcRealMatrixX Jacobian(DIMOFTASKSPACE6, NUMOFJOINTS5);
 	getJacobianMatrix(jointPosition, Jacobian);
-	EcRealMatrixX gramianMatrix = Jacobian.transpose() * Jacobian;   // 引入Gramian矩阵描述6×5雅克比的奇异性
+	EcRealMatrixX gramianMatrix = Jacobian.transpose() * Jacobian;   // ����Gramian��������6��5�ſ˱ȵ�������
 
 	Eigen::JacobiSVD<Eigen::MatrixXd> svd(gramianMatrix);
 	EcReal minSingularValue = svd.singularValues()(svd.singularValues().size() - 1);

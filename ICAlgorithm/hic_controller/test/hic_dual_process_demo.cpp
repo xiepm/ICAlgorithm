@@ -128,7 +128,7 @@ HicTorqueSensorConfig makeTorqueSensorConfig(const HicInitializeConfig& config)
 	std::snprintf(torqueSensorConfig.sensorLocation, sizeof(torqueSensorConfig.sensorLocation), "post_reducer");
 	torqueSensorConfig.jointCount = config.jointCount;
 	torqueSensorConfig.enableTorqueSensorFilter = true;
-	torqueSensorConfig.enableExternalTorqueFilter = true;
+	torqueSensorConfig.enableExternalTorqueFilter_current = true;
 	torqueSensorConfig.enableSaturationCheck = true;
 	torqueSensorConfig.enableFaultCheck = true;
 
@@ -144,7 +144,7 @@ HicTorqueSensorConfig makeTorqueSensorConfig(const HicInitializeConfig& config)
 		torqueSensorConfig.joints[i].biasNm = 0.0;
 		torqueSensorConfig.joints[i].maxValidTorqueNm = 120.0;
 		torqueSensorConfig.torqueSensorFilterAlpha[i] = 0.2;
-		torqueSensorConfig.externalTorqueFilterAlpha[i] = 0.2;
+		torqueSensorConfig.externalTorqueFilterAlpha_current[i] = 0.2;
 	}
 	return torqueSensorConfig;
 }
@@ -390,10 +390,15 @@ void printObservedState()
 	{
 		printVector("jointPosition", robotState.jointPosition, 7);
 		printVector("jointVelocity", robotState.jointVelocity, 7);
-		printVector("jointAcceleration", robotState.jointAcceleration, 7);
-		printVector("motorCurrent", robotState.motorCurrent, 7);
-		printVector("motorEstimatedTorque", robotState.motorEstimatedTorque, 7);
-	}
+			printVector("jointAcceleration", robotState.jointAcceleration, 7);
+			printVector("motorCurrent", robotState.motorCurrent, 7);
+			printVector("motorEstimatedTorque_current", robotState.motorEstimatedTorque_current, 7);
+			printVector("gravityTorque", robotState.gravityTorque, 7);
+			printVector("coriolisTorque", robotState.coriolisTorque, 7);
+			printVector("frictionTorque", robotState.frictionTorque, 7);
+			printVector("modelTorque", robotState.modelTorque, 7);
+			printVector("externalTorque_current", robotState.externalTorque_current, 7);
+		}
 
 	HicActiveControlState activeState = {};
 	const int activeStateStatus = hic_get_active_control_state(0, &activeState);

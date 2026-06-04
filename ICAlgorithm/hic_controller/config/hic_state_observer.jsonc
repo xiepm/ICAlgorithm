@@ -7,12 +7,12 @@
     "enableVelocityFilter": true,
     "enableAccelerationFilter": true,
     "enableMotorCurrentFilter": true,
-    "enableMeasuredTorqueFilter": true,
+    "enableMeasuredTorqueFilter_sensor": true,
     "enableCurrentToTorqueEstimate": true,
     "positionFilterAlpha": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
     "velocityFilterAlpha": [0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2],
     "accelerationFilterAlpha": [0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2],
     "motorCurrentFilterAlpha": [0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2],
-    "measuredTorqueFilterAlpha": [0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2]
+    "measuredTorqueFilterAlpha_sensor": [0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2]
   }
 }

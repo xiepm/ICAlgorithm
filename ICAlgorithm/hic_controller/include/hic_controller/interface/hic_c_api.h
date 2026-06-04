@@ -76,6 +76,13 @@ typedef enum HicCommandLoopType
 	HIC_COMMAND_LOOP_TORQUE = 1   ///< 外部驱动器接收关节力矩命令，单位 N.m。
 } HicCommandLoopType;
 
+/// @brief 外力矩补偿来源。
+typedef enum HicExternalTorqueSource
+{
+	HIC_EXTERNAL_TORQUE_SOURCE_CURRENT = 0, ///< 使用 externalTorque_current。
+	HIC_EXTERNAL_TORQUE_SOURCE_SENSOR = 1 ///< 使用 externalTorque_sensor。
+} HicExternalTorqueSource;
+
 /// @brief HIC 固定维度常量。
 typedef enum HicDimensions
 {
@@ -86,6 +93,17 @@ typedef enum HicDimensions
 	HIC_MAX_DYNAMIC_PARAMS = HIC_MAX_JOINTS * HIC_DYNAMIC_PARAM_PER_JOINT, ///< 最大动力学参数数量。
 	HIC_MAX_JACOBIAN_SIZE = HIC_CARTESIAN_DIM * HIC_MAX_JOINTS ///< 最大雅可比矩阵元素数量，行主序。
 } HicDimensions;
+
+typedef enum HicImpedanceParameterDimensions
+{
+	HIC_JOINT_IMPEDANCE_PARAM_PER_JOINT = 2,
+	HIC_NULLSPACE_PARAM_PER_JOINT = 3,
+	HIC_MAX_IMPEDANCE_PARAMS =
+		1 +
+		HIC_MAX_JOINTS * HIC_JOINT_IMPEDANCE_PARAM_PER_JOINT +
+		HIC_CARTESIAN_DIM * 2 +
+		HIC_MAX_JOINTS * HIC_NULLSPACE_PARAM_PER_JOINT
+} HicImpedanceParameterDimensions;
 
 /// @brief 控制器初始化配置。
 /// @note 该结构体只包含创建控制器所需的最小参数；运行时限值、动力学参数、电机参数等通过 set 接口继续配置。
@@ -160,7 +178,20 @@ typedef struct HicJointImpedanceConfig
 	double targetVelocity[HIC_MAX_JOINTS]; ///< 期望关节速度 dq_d，单位 rad/s，通常设为 0。
 	double targetAcceleration[HIC_MAX_JOINTS]; ///< 期望关节加速度 ddq_d，单位 rad/s^2；当前 PD 控制律暂不使用。
 	bool enableExternalTorqueCompensation; ///< 是否减去外力矩估计 tau_ext_hat，实现外力矩补偿。
+	int externalTorqueSource; ///< 外力矩补偿来源，见 HicExternalTorqueSource。
 } HicJointImpedanceConfig;
+
+typedef struct HicSingleJointImpedanceConfig
+{
+	int jointIndex; ///< 关节编号，从 1 开始。
+	double stiffness; ///< 关节刚度 Kd，单位 N.m/rad。
+	double damping; ///< 关节阻尼 Dd，单位 N.m.s/rad。
+	double targetPosition; ///< 期望关节位置 q_d；C API 输入单位 deg，内部转换为 rad。
+	double targetVelocity; ///< 期望关节速度 dq_d，单位 rad/s。
+	double targetAcceleration; ///< 期望关节加速度 ddq_d，单位 rad/s^2。
+	bool enableExternalTorqueCompensation; ///< 是否启用外力矩补偿。
+	int externalTorqueSource; ///< 外力矩补偿来源，见 HicExternalTorqueSource。
+} HicSingleJointImpedanceConfig;
 
 /// @brief 机器人关节状态观测器配置。
 typedef struct HicRobotStateObserverConfig
@@ -172,13 +203,13 @@ typedef struct HicRobotStateObserverConfig
 	bool enableVelocityFilter; ///< 是否启用关节速度滤波。
 	bool enableAccelerationFilter; ///< 是否启用关节加速度滤波。
 	bool enableMotorCurrentFilter; ///< 是否启用电机电流滤波。
-	bool enableMeasuredTorqueFilter; ///< 是否启用实测关节力矩滤波。
+	bool enableMeasuredTorqueFilter_sensor; ///< 是否启用实测关节力矩滤波。
 
 	double positionFilterAlpha[HIC_MAX_JOINTS]; ///< 位置一阶低通滤波系数，范围通常为 0~1。
 	double velocityFilterAlpha[HIC_MAX_JOINTS]; ///< 速度一阶低通滤波系数，范围通常为 0~1。
 	double accelerationFilterAlpha[HIC_MAX_JOINTS]; ///< 加速度一阶低通滤波系数，范围通常为 0~1。
 	double motorCurrentFilterAlpha[HIC_MAX_JOINTS]; ///< 电机电流一阶低通滤波系数，范围通常为 0~1。
-	double measuredTorqueFilterAlpha[HIC_MAX_JOINTS]; ///< 实测力矩一阶低通滤波系数，范围通常为 0~1。
+	double measuredTorqueFilterAlpha_sensor[HIC_MAX_JOINTS]; ///< 实测力矩一阶低通滤波系数，范围通常为 0~1。
 
 	double lowerJointPosition[HIC_MAX_JOINTS]; ///< 关节位置下限，内部单位 rad。
 	double upperJointPosition[HIC_MAX_JOINTS]; ///< 关节位置上限，内部单位 rad。
@@ -192,9 +223,9 @@ typedef struct HicRobotStateObserverConfig
 	double lowerMotorCurrent[HIC_MAX_JOINTS]; ///< 电机电流下限，单位 A。
 	double upperMotorCurrent[HIC_MAX_JOINTS]; ///< 电机电流上限，单位 A。
 	double maxAbsMotorCurrent[HIC_MAX_JOINTS]; ///< 电机电流最大绝对值，单位 A。
-	double lowerMeasuredTorque[HIC_MAX_JOINTS]; ///< 实测关节力矩下限，单位 N.m。
-	double upperMeasuredTorque[HIC_MAX_JOINTS]; ///< 实测关节力矩上限，单位 N.m。
-	double maxAbsMeasuredTorque[HIC_MAX_JOINTS]; ///< 实测关节力矩最大绝对值，单位 N.m。
+	double lowerMeasuredTorque_sensor[HIC_MAX_JOINTS]; ///< 实测关节力矩下限，单位 N.m。
+	double upperMeasuredTorque_sensor[HIC_MAX_JOINTS]; ///< 实测关节力矩上限，单位 N.m。
+	double maxAbsMeasuredTorque_sensor[HIC_MAX_JOINTS]; ///< 实测关节力矩最大绝对值，单位 N.m。
 
 	double torqueConstant[HIC_MAX_JOINTS]; ///< 电机力矩常数，单位 N.m/A。
 	double gearRatio[HIC_MAX_JOINTS]; ///< 减速比，用于电机侧到关节侧换算。
@@ -232,8 +263,8 @@ typedef struct HicTorqueSensorConfig
 	bool enableTorqueSensorFilter; ///< 是否启用原始关节力矩传感器滤波。
 	double torqueSensorFilterAlpha[HIC_MAX_JOINTS]; ///< 原始力矩传感器一阶低通滤波系数。
 
-	bool enableExternalTorqueFilter; ///< 是否启用外力矩估计滤波。
-	double externalTorqueFilterAlpha[HIC_MAX_JOINTS]; ///< 外力矩估计一阶低通滤波系数。
+	bool enableExternalTorqueFilter_current; ///< 是否启用外力矩估计滤波。
+	double externalTorqueFilterAlpha_current[HIC_MAX_JOINTS]; ///< 外力矩估计一阶低通滤波系数。
 
 	bool enableSaturationCheck; ///< 是否启用传感器饱和检查。
 	bool enableFaultCheck; ///< 是否启用传感器故障检查。
@@ -246,8 +277,16 @@ typedef struct HicRobotState
 	double jointVelocity[HIC_MAX_JOINTS]; ///< 关节速度，单位 rad/s。
 	double jointAcceleration[HIC_MAX_JOINTS]; ///< 关节加速度，单位 rad/s^2。
 	double motorCurrent[HIC_MAX_JOINTS]; ///< 电机电流，单位 A。
-	double jointMeasuredTorque[HIC_MAX_JOINTS]; ///< 关节实测力矩，单位 N.m。
-	double motorEstimatedTorque[HIC_MAX_JOINTS]; ///< 由电机电流估算的关节力矩，单位 N.m。
+	double jointMeasuredTorque_sensor[HIC_MAX_JOINTS]; ///< 关节实测力矩，单位 N.m。
+	double motorEstimatedTorque_current[HIC_MAX_JOINTS]; ///< 由电机电流估算的关节力矩，单位 N.m。
+	double gravityTorque[HIC_MAX_JOINTS]; ///< 最近一次动力学重力项力矩，单位 N.m。
+	double coriolisTorque[HIC_MAX_JOINTS]; ///< 最近一次动力学科氏/离心项力矩，单位 N.m。
+	double frictionTorque[HIC_MAX_JOINTS]; ///< 最近一次动力学摩擦项力矩，单位 N.m。
+	double modelTorque[HIC_MAX_JOINTS]; ///< 兼容字段，等同于 modelTorque_current。
+	double modelTorque_current[HIC_MAX_JOINTS]; ///< 使用电流力矩整定参数计算的模型合力矩，单位 N.m。
+	double modelTorque_sensor[HIC_MAX_JOINTS]; ///< 使用扭矩传感器整定参数计算的模型合力矩，单位 N.m。
+	double externalTorque_current[HIC_MAX_JOINTS]; ///< 最近一次由电流反推得到的外力矩估计，单位 N.m。
+	double externalTorque_sensor[HIC_MAX_JOINTS]; ///< 最近一次由扭矩传感器得到的外力矩估计，单位 N.m。
 } HicRobotState;
 
 /// @brief 当前末端笛卡尔状态输出。
@@ -296,8 +335,11 @@ typedef struct HicDynamicsTorqueTerms
 /// @brief 内部估计的动力学与外力矩输出。
 typedef struct HicEstimatedDynamicsTorques
 {
-	HicDynamicsTorqueTerms terms; ///< 动力学模型各分项。
-	double externalTorque[HIC_MAX_JOINTS]; ///< 估计外力矩，单位 N.m。
+	HicDynamicsTorqueTerms terms; ///< 兼容字段，等同于 terms_current。
+	HicDynamicsTorqueTerms terms_current; ///< 使用电流力矩整定参数计算的动力学模型各分项。
+	HicDynamicsTorqueTerms terms_sensor; ///< 使用扭矩传感器整定参数计算的动力学模型各分项。
+	double externalTorque_current[HIC_MAX_JOINTS]; ///< 由电流反推得到的外力矩估计，单位 N.m。
+	double externalTorque_sensor[HIC_MAX_JOINTS]; ///< 由扭矩传感器得到的外力矩估计，单位 N.m。
 } HicEstimatedDynamicsTorques;
 
 /// @brief 当前控制器活动状态。
@@ -453,12 +495,15 @@ using ::HicStatus;
 using ::HicControlMode;
 using ::HicForceControlMode;
 using ::HicCommandLoopType;
+using ::HicExternalTorqueSource;
 using ::HicDimensions;
+using ::HicImpedanceParameterDimensions;
 using ::HicInitializeConfig;
 using ::HicControlConfig;
 using ::HicImpedanceGains;
 using ::HicNullspaceControlConfig;
 using ::HicJointImpedanceConfig;
+using ::HicSingleJointImpedanceConfig;
 using ::HicRobotStateObserverConfig;
 using ::HicJointTorqueSensorConfig;
 using ::HicTorqueSensorConfig;
@@ -534,6 +579,14 @@ HIC_EXPORT int hic_initialize_control(RTS_IEC_INT groupId, const HicInitializeCo
 HIC_EXPORT int hic_set_dynamics_linear_parameters(RTS_IEC_INT groupId,
 	const double dynamic_params[HIC_MAX_DYNAMIC_PARAMS]);
 
+/// @brief 设置基于电流力矩整定得到的线性化动力学参数。
+HIC_EXPORT int hic_set_dynamics_linear_parameters_current(RTS_IEC_INT groupId,
+	const double dynamic_params[HIC_MAX_DYNAMIC_PARAMS]);
+
+/// @brief 设置基于扭矩传感器整定得到的线性化动力学参数。
+HIC_EXPORT int hic_set_dynamics_linear_parameters_sensor(RTS_IEC_INT groupId,
+	const double dynamic_params[HIC_MAX_DYNAMIC_PARAMS]);
+
 /// @brief 设置末端负载质量与质心。
 HIC_EXPORT int hic_set_payload_mass_properties(RTS_IEC_INT groupId,
 	double mass,
@@ -600,6 +653,10 @@ HIC_EXPORT int hic_set_dual_encoder_assist_config(RTS_IEC_INT groupId,const HicD
 /// @brief 设置笛卡尔阻抗增益。
 HIC_EXPORT int hic_set_cartesian_impedance_gains(RTS_IEC_INT groupId,const HicImpedanceGains* gains);
 
+/// @brief 设置展开后的阻抗性能参数。
+HIC_EXPORT int hic_set_impedance_parameters(RTS_IEC_INT groupId,
+	const double impedance_params[HIC_MAX_IMPEDANCE_PARAMS]);
+
 /// @brief 设置零空间配置。
 HIC_EXPORT int hic_set_force_control_nullspace_config(RTS_IEC_INT groupId,const HicNullspaceControlConfig* config);
 
@@ -615,6 +672,11 @@ HIC_EXPORT int hic_capture_current_joint_position_as_nullspace_target(RTS_IEC_IN
 HIC_EXPORT int hic_set_joint_impedance_config(
 	RTS_IEC_INT groupId,
 	const HicJointImpedanceConfig* config);
+
+/// @brief 设置单个关节的关节空间阻抗参数，其他关节保持当前配置不变。
+HIC_EXPORT int hic_set_single_joint_impedance_config(
+	RTS_IEC_INT groupId,
+	const HicSingleJointImpedanceConfig* config);
 
 /// @brief 抓取当前滤波后的关节位置作为关节阻抗平衡点。
 /// @param groupId 控制组编号；通常传 0。

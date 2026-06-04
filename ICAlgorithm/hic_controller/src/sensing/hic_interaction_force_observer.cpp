@@ -46,7 +46,8 @@ HicStatus HicInteractionForceObserver::initialize(int jointCount, double control
 {
 	if (jointCount <= 0 || jointCount > HIC_MAX_JOINTS || controlPeriod <= 0.0)
 	{
-		return HIC_STATUS_ERROR_INVALID_PARAM;
+	
+	return HIC_STATUS_ERROR_INVALID_PARAM;
 	}
 
 	jointCount_ = jointCount;
@@ -59,22 +60,33 @@ HicStatus HicInteractionForceObserver::initialize(int jointCount, double control
 	copyCString(torqueSensorConfig_.unit, sizeof(torqueSensorConfig_.unit), "N.m");
 	copyCString(torqueSensorConfig_.sensorLocation, sizeof(torqueSensorConfig_.sensorLocation), "unknown");
 	torqueSensorConfig_.enableTorqueSensorFilter = true;
-	torqueSensorConfig_.enableExternalTorqueFilter = true;
+	torqueSensorConfig_.enableExternalTorqueFilter_current = true;
 	torqueSensorConfig_.enableSaturationCheck = true;
 	torqueSensorConfig_.enableFaultCheck = true;
 	for (int i = 0; i < HIC_MAX_JOINTS; ++i)
 	{
-		torqueSensorConfig_.joints[i].enabled = false;
-		torqueSensorConfig_.joints[i].jointIndex = i + 1;
-		torqueSensorConfig_.joints[i].hardwareChannel = i;
-		torqueSensorConfig_.joints[i].ratedCapacityNm = 0.0;
-		torqueSensorConfig_.joints[i].directionSign = 1;
-		torqueSensorConfig_.joints[i].zeroOffsetNm = 0.0;
-		torqueSensorConfig_.joints[i].scale = 1.0;
-		torqueSensorConfig_.joints[i].biasNm = 0.0;
-		torqueSensorConfig_.joints[i].maxValidTorqueNm = 0.0;
-		torqueSensorConfig_.torqueSensorFilterAlpha[i] = 0.2;
-		torqueSensorConfig_.externalTorqueFilterAlpha[i] = 0.2;
+	
+	torqueSensorConfig_.joints[i].enabled = false;
+	
+	torqueSensorConfig_.joints[i].jointIndex = i + 1;
+	
+	torqueSensorConfig_.joints[i].hardwareChannel = i;
+	
+	torqueSensorConfig_.joints[i].ratedCapacityNm = 0.0;
+	
+	torqueSensorConfig_.joints[i].directionSign = 1;
+	
+	torqueSensorConfig_.joints[i].zeroOffsetNm = 0.0;
+	
+	torqueSensorConfig_.joints[i].scale = 1.0;
+	
+	torqueSensorConfig_.joints[i].biasNm = 0.0;
+	
+	torqueSensorConfig_.joints[i].maxValidTorqueNm = 0.0;
+	
+	torqueSensorConfig_.torqueSensorFilterAlpha[i] = 0.2;
+	
+	torqueSensorConfig_.externalTorqueFilterAlpha_current[i] = 0.2;
 	}
 	initialized_ = true;
 	return HIC_STATUS_OK;
@@ -84,13 +96,15 @@ HicStatus HicInteractionForceObserver::setTorqueSensorConfig(const HicTorqueSens
 {
 	if (!initialized_)
 	{
-		return HIC_STATUS_ERROR_INIT;
+	
+	return HIC_STATUS_ERROR_INIT;
 	}
 
 	const HicStatus status = validateTorqueSensorConfig(config);
 	if (status != HIC_STATUS_OK)
 	{
-		return status;
+	
+	return status;
 	}
 
 	torqueSensorConfig_ = config;
@@ -101,7 +115,8 @@ HicStatus HicInteractionForceObserver::getTorqueSensorConfig(HicTorqueSensorConf
 {
 	if (!initialized_)
 	{
-		return HIC_STATUS_ERROR_INIT;
+	
+	return HIC_STATUS_ERROR_INIT;
 	}
 
 	configOut = torqueSensorConfig_;
@@ -112,11 +127,13 @@ HicStatus HicInteractionForceObserver::loadTorqueSensorConfigFromFile(const char
 {
 	if (!initialized_)
 	{
-		return HIC_STATUS_ERROR_INIT;
+	
+	return HIC_STATUS_ERROR_INIT;
 	}
 	if (!filePath)
 	{
-		return HIC_STATUS_ERROR_NULL_POINTER;
+	
+	return HIC_STATUS_ERROR_NULL_POINTER;
 	}
 	return HIC_STATUS_ERROR_NOT_IMPLEMENTED;
 }
@@ -125,18 +142,22 @@ HicStatus HicInteractionForceObserver::updateRawJointTorqueSensor(const double* 
 {
 	if (!initialized_)
 	{
-		return HIC_STATUS_ERROR_INIT;
+	
+	return HIC_STATUS_ERROR_INIT;
 	}
 	if (!rawTorqueByHardwareChannel)
 	{
-		return HIC_STATUS_ERROR_NULL_POINTER;
+	
+	return HIC_STATUS_ERROR_NULL_POINTER;
 	}
 
 	for (int i = 0; i < jointCount_; ++i)
 	{
-		if (!std::isfinite(rawTorqueByHardwareChannel[i]))
+	
+	if (!std::isfinite(rawTorqueByHardwareChannel[i]))
 		{
-			return HIC_STATUS_ERROR_INVALID_PARAM;
+		
+	return HIC_STATUS_ERROR_INVALID_PARAM;
 		}
 	}
 
@@ -148,38 +169,66 @@ HicStatus HicInteractionForceObserver::updateRawJointTorqueSensor(const double* 
 	const HicStatus status = calibrateJointTorqueSensor(rawTorqueByHardwareChannel);
 	if (status != HIC_STATUS_OK)
 	{
-		return status;
+	
+	return status;
 	}
 
 	applyTorqueSensorFilter();
 	return HIC_STATUS_OK;
 }
 
-HicStatus HicInteractionForceObserver::updateJointExternalTorque(const double* jointExternalTorque)
+HicStatus HicInteractionForceObserver::updateJointExternalTorque_current(const double* jointExternalTorque_current)
 {
-	// 更新关节外力矩估计。
-	// 该输入既可以来自外部显式调用，也可以来自 coordinator 的电流反推链路：
-	// tau_ext_hat_raw = motorEstimatedTorque - dynamicsModelTorque。
-	// 本类只负责合法性检查和低通滤波，不参与阻抗控制律本身。
+	// 更新关节外力矩估计�?	// 该输入既可以来自外部显式调用，也可以来自 coordinator 的电流反推链路：
+	// tau_ext_hat_raw = motorEstimatedTorque_current - dynamicsModelTorque�?	// 本类只负责合法性检查和低通滤波，不参与阻抗控制律本身�?
+	if (!initialized_)
+	{
+	
+	return HIC_STATUS_ERROR_INIT;
+	}
+	if (!jointExternalTorque_current)
+	{
+	
+	return HIC_STATUS_ERROR_NULL_POINTER;
+	}
+
+	for (int i = 0; i < jointCount_; ++i)
+	{
+	
+	if (!std::isfinite(jointExternalTorque_current[i]))
+		{
+		
+	return HIC_STATUS_ERROR_INVALID_PARAM;
+		}
+	
+	jointExternalTorque_current_[i] = jointExternalTorque_current[i];
+	}
+	// 使用 HicTorqueSensorConfig::externalTorqueFilterAlpha_current 对外力矩估计做低通滤波�?
+	applyExternalTorqueFilter_current();
+	return HIC_STATUS_OK;
+}
+
+HicStatus HicInteractionForceObserver::updateJointExternalTorque_sensor(const double* jointExternalTorque_sensor)
+{
 	if (!initialized_)
 	{
 		return HIC_STATUS_ERROR_INIT;
 	}
-	if (!jointExternalTorque)
+	if (!jointExternalTorque_sensor)
 	{
 		return HIC_STATUS_ERROR_NULL_POINTER;
 	}
 
 	for (int i = 0; i < jointCount_; ++i)
 	{
-		if (!std::isfinite(jointExternalTorque[i]))
+		if (!std::isfinite(jointExternalTorque_sensor[i]))
 		{
 			return HIC_STATUS_ERROR_INVALID_PARAM;
 		}
-		jointExternalTorque_[i] = jointExternalTorque[i];
+		jointExternalTorque_sensor_[i] = jointExternalTorque_sensor[i];
 	}
-	// 使用 HicTorqueSensorConfig::externalTorqueFilterAlpha 对外力矩估计做低通滤波。
-	applyExternalTorqueFilter();
+
+	applyExternalTorqueFilter_sensor();
 	return HIC_STATUS_OK;
 }
 
@@ -187,11 +236,13 @@ HicStatus HicInteractionForceObserver::getCalibratedJointTorqueSensor(double* ca
 {
 	if (!initialized_)
 	{
-		return HIC_STATUS_ERROR_INIT;
+	
+	return HIC_STATUS_ERROR_INIT;
 	}
 	if (!calibratedJointTorque)
 	{
-		return HIC_STATUS_ERROR_NULL_POINTER;
+	
+	return HIC_STATUS_ERROR_NULL_POINTER;
 	}
 
 	for (int i = 0; i < jointCount_; ++i)
@@ -205,11 +256,13 @@ HicStatus HicInteractionForceObserver::getFilteredJointTorqueSensor(double* filt
 {
 	if (!initialized_)
 	{
-		return HIC_STATUS_ERROR_INIT;
+	
+	return HIC_STATUS_ERROR_INIT;
 	}
 	if (!filteredJointTorque)
 	{
-		return HIC_STATUS_ERROR_NULL_POINTER;
+	
+	return HIC_STATUS_ERROR_NULL_POINTER;
 	}
 
 	for (int i = 0; i < jointCount_; ++i)
@@ -219,21 +272,40 @@ HicStatus HicInteractionForceObserver::getFilteredJointTorqueSensor(double* filt
 	return HIC_STATUS_OK;
 }
 
-HicStatus HicInteractionForceObserver::getFilteredJointExternalTorque(double* jointExternalTorque) const
+HicStatus HicInteractionForceObserver::getFilteredJointExternalTorque_current(double* jointExternalTorque_current) const
 {
-	// 关节阻抗模式启用外力矩补偿时，会通过该接口读取滤波后的 tau_ext_hat。
-	// 读取函数不重新计算，只返回最近一次 updateJointExternalTorque() 的滤波结果。
+	// 关节阻抗模式启用外力矩补偿时，会通过该接口读取滤波后�?tau_ext_hat�?	// 读取函数不重新计算，只返回最近一�?updateJointExternalTorque_current() 的滤波结果�?
+	if (!initialized_)
+	{
+	
+	return HIC_STATUS_ERROR_INIT;
+	}
+	if (!jointExternalTorque_current)
+	{
+	
+	return HIC_STATUS_ERROR_NULL_POINTER;
+	}
+	for (int i = 0; i < jointCount_; ++i)
+	{
+	
+	jointExternalTorque_current[i] = filteredJointExternalTorque_current_[i];
+	}
+	return HIC_STATUS_OK;
+}
+
+HicStatus HicInteractionForceObserver::getFilteredJointExternalTorque_sensor(double* jointExternalTorque_sensor) const
+{
 	if (!initialized_)
 	{
 		return HIC_STATUS_ERROR_INIT;
 	}
-	if (!jointExternalTorque)
+	if (!jointExternalTorque_sensor)
 	{
 		return HIC_STATUS_ERROR_NULL_POINTER;
 	}
 	for (int i = 0; i < jointCount_; ++i)
 	{
-		jointExternalTorque[i] = filteredJointExternalTorque_[i];
+		jointExternalTorque_sensor[i] = filteredJointExternalTorque_sensor_[i];
 	}
 	return HIC_STATUS_OK;
 }
@@ -242,16 +314,19 @@ HicStatus HicInteractionForceObserver::getTorqueSensorFaultStatus(bool* faultSta
 {
 	if (!initialized_)
 	{
-		return HIC_STATUS_ERROR_INIT;
+	
+	return HIC_STATUS_ERROR_INIT;
 	}
 	if (!faultStatus)
 	{
-		return HIC_STATUS_ERROR_NULL_POINTER;
+	
+	return HIC_STATUS_ERROR_NULL_POINTER;
 	}
 
 	for (int i = 0; i < jointCount_; ++i)
 	{
-		faultStatus[i] = torqueSensorFaultStatus_[i];
+	
+	faultStatus[i] = torqueSensorFaultStatus_[i];
 	}
 	return HIC_STATUS_OK;
 }
@@ -261,8 +336,10 @@ void HicInteractionForceObserver::reset()
 	std::fill(rawTorqueByHardwareChannel_, rawTorqueByHardwareChannel_ + HIC_MAX_JOINTS, 0.0);
 	std::fill(calibratedJointTorqueSensor_, calibratedJointTorqueSensor_ + HIC_MAX_JOINTS, 0.0);
 	std::fill(filteredJointTorqueSensor_, filteredJointTorqueSensor_ + HIC_MAX_JOINTS, 0.0);
-	std::fill(jointExternalTorque_, jointExternalTorque_ + HIC_MAX_JOINTS, 0.0);
-	std::fill(filteredJointExternalTorque_, filteredJointExternalTorque_ + HIC_MAX_JOINTS, 0.0);
+	std::fill(jointExternalTorque_current_, jointExternalTorque_current_ + HIC_MAX_JOINTS, 0.0);
+	std::fill(filteredJointExternalTorque_current_, filteredJointExternalTorque_current_ + HIC_MAX_JOINTS, 0.0);
+	std::fill(jointExternalTorque_sensor_, jointExternalTorque_sensor_ + HIC_MAX_JOINTS, 0.0);
+	std::fill(filteredJointExternalTorque_sensor_, filteredJointExternalTorque_sensor_ + HIC_MAX_JOINTS, 0.0);
 	std::fill(torqueSensorFaultStatus_, torqueSensorFaultStatus_ + HIC_MAX_JOINTS, false);
 }
 
@@ -270,53 +347,70 @@ HicStatus HicInteractionForceObserver::validateTorqueSensorConfig(const HicTorqu
 {
 	if (config.jointCount <= 0 || config.jointCount > HIC_MAX_JOINTS || config.jointCount != jointCount_)
 	{
-		return HIC_STATUS_ERROR_INVALID_PARAM;
+	
+	return HIC_STATUS_ERROR_INVALID_PARAM;
 	}
 
 	for (int i = 0; i < config.jointCount; ++i)
 	{
-		if (!std::isfinite(config.torqueSensorFilterAlpha[i]) ||
-			!std::isfinite(config.externalTorqueFilterAlpha[i]) ||
+	
+	if (!std::isfinite(config.torqueSensorFilterAlpha[i]) ||
+			!std::isfinite(config.externalTorqueFilterAlpha_current[i]) ||
 			config.torqueSensorFilterAlpha[i] < 0.0 ||
 			config.torqueSensorFilterAlpha[i] > 1.0 ||
-			config.externalTorqueFilterAlpha[i] < 0.0 ||
-			config.externalTorqueFilterAlpha[i] > 1.0)
+			config.externalTorqueFilterAlpha_current[i] < 0.0 ||
+			config.externalTorqueFilterAlpha_current[i] > 1.0)
 		{
-			return HIC_STATUS_ERROR_INVALID_PARAM;
+		
+	return HIC_STATUS_ERROR_INVALID_PARAM;
 		}
 
-		const HicJointTorqueSensorConfig& jointConfig = config.joints[i];
-		if (!jointConfig.enabled)
+	
+	const HicJointTorqueSensorConfig& jointConfig = config.joints[i];
+	
+	if (!jointConfig.enabled)
 		{
 			continue;
 		}
 
-		if (jointConfig.jointIndex <= 0 || jointConfig.jointIndex > jointCount_)
+	
+	if (jointConfig.jointIndex <= 0 || jointConfig.jointIndex > jointCount_)
 		{
-			return HIC_STATUS_ERROR_INVALID_PARAM;
+		
+	return HIC_STATUS_ERROR_INVALID_PARAM;
 		}
-		if (jointConfig.hardwareChannel < 0 || jointConfig.hardwareChannel >= jointCount_)
+	
+	if (jointConfig.hardwareChannel < 0 || jointConfig.hardwareChannel >= jointCount_)
 		{
-			return HIC_STATUS_ERROR_INVALID_PARAM;
+		
+	return HIC_STATUS_ERROR_INVALID_PARAM;
 		}
-		if (jointConfig.directionSign != 1 && jointConfig.directionSign != -1)
+	
+	if (jointConfig.directionSign != 1 && jointConfig.directionSign != -1)
 		{
-			return HIC_STATUS_ERROR_INVALID_PARAM;
+		
+	return HIC_STATUS_ERROR_INVALID_PARAM;
 		}
-		if (!std::isfinite(jointConfig.scale) || jointConfig.scale == 0.0)
+	
+	if (!std::isfinite(jointConfig.scale) || jointConfig.scale == 0.0)
 		{
-			return HIC_STATUS_ERROR_INVALID_PARAM;
+		
+	return HIC_STATUS_ERROR_INVALID_PARAM;
 		}
-		if (config.enableFaultCheck &&
+	
+	if (config.enableFaultCheck &&
 			(!std::isfinite(jointConfig.maxValidTorqueNm) || jointConfig.maxValidTorqueNm <= 0.0))
 		{
-			return HIC_STATUS_ERROR_INVALID_PARAM;
+		
+	return HIC_STATUS_ERROR_INVALID_PARAM;
 		}
-		if (!std::isfinite(jointConfig.zeroOffsetNm) ||
+	
+	if (!std::isfinite(jointConfig.zeroOffsetNm) ||
 			!std::isfinite(jointConfig.biasNm) ||
 			!std::isfinite(jointConfig.ratedCapacityNm))
 		{
-			return HIC_STATUS_ERROR_INVALID_PARAM;
+		
+	return HIC_STATUS_ERROR_INVALID_PARAM;
 		}
 	}
 
@@ -330,34 +424,45 @@ HicStatus HicInteractionForceObserver::calibrateJointTorqueSensor(const double* 
 
 	for (int configIndex = 0; configIndex < jointCount_; ++configIndex)
 	{
-		const HicJointTorqueSensorConfig& jointConfig = torqueSensorConfig_.joints[configIndex];
-		if (!jointConfig.enabled)
+	
+	const HicJointTorqueSensorConfig& jointConfig = torqueSensorConfig_.joints[configIndex];
+	
+	if (!jointConfig.enabled)
 		{
 			continue;
 		}
 
-		const int jointArrayIndex = jointConfig.jointIndex - 1;
-		const int hardwareChannel = jointConfig.hardwareChannel;
-		if (jointArrayIndex < 0 || jointArrayIndex >= jointCount_ ||
+	
+	const int jointArrayIndex = jointConfig.jointIndex - 1;
+	
+	const int hardwareChannel = jointConfig.hardwareChannel;
+	
+	if (jointArrayIndex < 0 || jointArrayIndex >= jointCount_ ||
 			hardwareChannel < 0 || hardwareChannel >= jointCount_)
 		{
-			if (torqueSensorConfig_.enableFaultCheck)
+		
+	if (torqueSensorConfig_.enableFaultCheck)
 			{
 				torqueSensorFaultStatus_[configIndex] = true;
-				return HIC_STATUS_ERROR_INVALID_PARAM;
+			
+	return HIC_STATUS_ERROR_INVALID_PARAM;
 			}
 			continue;
 		}
 
-		const double raw = rawTorqueByHardwareChannel[hardwareChannel];
-		const double calibratedTorque =
+	
+	const double raw = rawTorqueByHardwareChannel[hardwareChannel];
+	
+	const double calibratedTorque =
 			static_cast<double>(jointConfig.directionSign) *
 			(raw - jointConfig.zeroOffsetNm) * jointConfig.scale + jointConfig.biasNm;
 		calibratedJointTorqueSensor_[jointArrayIndex] = calibratedTorque;
 
-		if (torqueSensorConfig_.enableSaturationCheck &&
+	
+	if (torqueSensorConfig_.enableSaturationCheck &&
 			jointConfig.maxValidTorqueNm > 0.0 &&
-			std::fabs(calibratedTorque) > jointConfig.maxValidTorqueNm)
+		
+	std::fabs(calibratedTorque) > jointConfig.maxValidTorqueNm)
 		{
 			torqueSensorFaultStatus_[jointArrayIndex] = true;
 		}
@@ -370,31 +475,53 @@ void HicInteractionForceObserver::applyTorqueSensorFilter()
 {
 	for (int i = 0; i < jointCount_; ++i)
 	{
-		if (!torqueSensorConfig_.enableTorqueSensorFilter)
+	
+	if (!torqueSensorConfig_.enableTorqueSensorFilter)
 		{
 			filteredJointTorqueSensor_[i] = calibratedJointTorqueSensor_[i];
 			continue;
 		}
 
-		const double alpha = clampAlpha(torqueSensorConfig_.torqueSensorFilterAlpha[i]);
+	
+	const double alpha = clampAlpha(torqueSensorConfig_.torqueSensorFilterAlpha[i]);
 		filteredJointTorqueSensor_[i] =
 			(1.0 - alpha) * filteredJointTorqueSensor_[i] + alpha * calibratedJointTorqueSensor_[i];
 	}
 }
 
-void HicInteractionForceObserver::applyExternalTorqueFilter()
+void HicInteractionForceObserver::applyExternalTorqueFilter_current()
 {
 	for (int i = 0; i < jointCount_; ++i)
 	{
-		if (!torqueSensorConfig_.enableExternalTorqueFilter)
+	
+	if (!torqueSensorConfig_.enableExternalTorqueFilter_current)
 		{
-			filteredJointExternalTorque_[i] = jointExternalTorque_[i];
+		
+	filteredJointExternalTorque_current_[i] = jointExternalTorque_current_[i];
 			continue;
 		}
 
-		const double alpha = clampAlpha(torqueSensorConfig_.externalTorqueFilterAlpha[i]);
-		filteredJointExternalTorque_[i] =
-			(1.0 - alpha) * filteredJointExternalTorque_[i] + alpha * jointExternalTorque_[i];
+	
+	const double alpha = clampAlpha(torqueSensorConfig_.externalTorqueFilterAlpha_current[i]);
+	
+	filteredJointExternalTorque_current_[i] =
+			(1.0 - alpha) * filteredJointExternalTorque_current_[i] + alpha * jointExternalTorque_current_[i];
+	}
+}
+
+void HicInteractionForceObserver::applyExternalTorqueFilter_sensor()
+{
+	for (int i = 0; i < jointCount_; ++i)
+	{
+		if (!torqueSensorConfig_.enableExternalTorqueFilter_current)
+		{
+			filteredJointExternalTorque_sensor_[i] = jointExternalTorque_sensor_[i];
+			continue;
+		}
+
+		const double alpha = clampAlpha(torqueSensorConfig_.externalTorqueFilterAlpha_current[i]);
+		filteredJointExternalTorque_sensor_[i] =
+			(1.0 - alpha) * filteredJointExternalTorque_sensor_[i] + alpha * jointExternalTorque_sensor_[i];
 	}
 }
 

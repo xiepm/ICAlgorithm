@@ -41,6 +41,28 @@ public:
 		(void)tau;
 	}
 
+	virtual void computeCoriolisTorque(
+		const EcRealVector& q,
+		const EcRealVector& dq,
+		EcRealVector& tau) const
+	{
+		(void)q;
+		(void)dq;
+		(void)tau;
+	}
+
+	virtual void computeFrictionTorque(
+		const EcRealVector& q,
+		const EcRealVector& dq,
+		const EcRealVector& ddq,
+		EcRealVector& tau) const
+	{
+		(void)q;
+		(void)dq;
+		(void)ddq;
+		(void)tau;
+	}
+
 	virtual EcBoolean setPayloadMassProperties(
 		const EcReal,
 		const EcRealVector&)

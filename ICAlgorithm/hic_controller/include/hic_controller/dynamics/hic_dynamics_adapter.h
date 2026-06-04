@@ -29,6 +29,12 @@ public:
 	/// @brief 在线更新动力学参数。
 	HicStatus setDynamicParameters(const double* dynamicParams);
 
+	/// @brief 在线更新基于电流力矩整定得到的动力学参数。
+	HicStatus setDynamicParameters_current(const double* dynamicParams);
+
+	/// @brief 在线更新基于扭矩传感器整定得到的动力学参数。
+	HicStatus setDynamicParameters_sensor(const double* dynamicParams);
+
 	/// @brief 在线更新机器人几何/DH 参数。
 	HicStatus setRobotKinematicParameters(const double* kinematicParams);
 
@@ -57,17 +63,41 @@ public:
 		double* massMatrixRowMajor);
 
 	HicStatus computeFrictionTorque(
+		const double* jointPosition,
 		const double* jointVelocity,
+		const double* jointAcceleration,
 		double* frictionTorque);
+
+	HicStatus computeModelTorque_current(
+		const double* jointPosition,
+		const double* jointVelocity,
+		const double* jointAcceleration,
+		double* modelTorque);
+
+	HicStatus computeModelTorque_sensor(
+		const double* jointPosition,
+		const double* jointVelocity,
+		const double* jointAcceleration,
+		double* modelTorque);
 
 	void reset();
 
 private:
+	HicStatus setDynamicParametersTo(double* destination, const double* dynamicParams);
+	HicStatus computeModelTorqueWithParameters(
+		const double* dynamicParams,
+		const double* jointPosition,
+		const double* jointVelocity,
+		const double* jointAcceleration,
+		double* modelTorque);
+
 	int robotType_;
 	int jointCount_;
+	int modelJointCount_;
 	bool initialized_;
 	void* backend_;
-	double dynamicParams_[HIC_MAX_DYNAMIC_PARAMS];
+	double dynamicParams_current_[HIC_MAX_DYNAMIC_PARAMS];
+	double dynamicParams_sensor_[HIC_MAX_DYNAMIC_PARAMS];
 	double payloadMass_;
 	double payloadCenterOfMass_[3];
 };

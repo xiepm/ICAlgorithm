@@ -41,9 +41,8 @@ const EcReal kDefaultRuntimeParms[91] = {
 
 static double signWithZero(double value)
 {
-	// Match the deadzone-aware Coulomb term used during identification.
-	const double deadzone = 1e-4;
-	return value < -deadzone ? -1.0 : value > deadzone ? 1.0 : 0.0;
+	const double velocitySmooth = 3.14159265358979323846 / 180.0;
+	return tanh(value / velocitySmooth);
 }
 
 static double square(double value)
